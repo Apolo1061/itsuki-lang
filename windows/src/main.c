@@ -8,6 +8,7 @@
 #include "embedded_lib.h"
 #include "package_manager.h"
 #include "arch_config.h"
+#include "diagnostics.h"
 
 #ifdef _WIN32
 __declspec(dllimport) unsigned long __stdcall GetModuleFileNameA(void* hModule, char* lpFilename, unsigned long nSize);
@@ -425,18 +426,26 @@ static void print_help(const char* prog_name) {
 }
 
 static void get_runtime_path(char* out_path, size_t max_len) {
-    FILE* f = fopen("lib/runtime.s", "rb");
+#ifdef _WIN32
+    const char* rt_name = (generator_get_target_bits() == 64) ? "runtime64.c" : "runtime.s";
+#else
+    const char* rt_name = "runtime64.c";
+#endif
+    char direct[64];
+    snprintf(direct, sizeof(direct), "lib/%s", rt_name);
+    FILE* f = fopen(direct, "rb");
     if (f) {
         fclose(f);
-        strncpy(out_path, "lib/runtime.s", max_len - 1);
+        strncpy(out_path, direct, max_len - 1);
         out_path[max_len - 1] = '\0';
         return;
     }
 #ifdef _WIN32
-    f = fopen("lib\\runtime.s", "rb");
+    snprintf(direct, sizeof(direct), "lib\\%s", rt_name);
+    f = fopen(direct, "rb");
     if (f) {
         fclose(f);
-        strncpy(out_path, "lib\\runtime.s", max_len - 1);
+        strncpy(out_path, direct, max_len - 1);
         out_path[max_len - 1] = '\0';
         return;
     }
@@ -447,13 +456,13 @@ static void get_runtime_path(char* out_path, size_t max_len) {
         if (!last_slash) last_slash = strrchr(exe_dir, '/');
         if (last_slash) {
             *last_slash = '\0';
-            snprintf(out_path, max_len, "%.490s\\lib\\runtime.s", exe_dir);
+            snprintf(out_path, max_len, "%.490s\\lib\\%s", exe_dir, rt_name);
             f = fopen(out_path, "rb");
             if (f) {
                 fclose(f);
                 return;
             }
-            snprintf(out_path, max_len, "%.490s\\..\\lib\\runtime.s", exe_dir);
+            snprintf(out_path, max_len, "%.490s\\..\\lib\\%s", exe_dir, rt_name);
             f = fopen(out_path, "rb");
             if (f) {
                 fclose(f);
@@ -461,7 +470,7 @@ static void get_runtime_path(char* out_path, size_t max_len) {
             }
         }
     }
-    strncpy(out_path, "lib\\runtime.s", max_len - 1);
+    snprintf(out_path, max_len, "lib\\%s", rt_name);
     out_path[max_len - 1] = '\0';
 #else
     char exe_dir[512] = {0};
@@ -471,13 +480,13 @@ static void get_runtime_path(char* out_path, size_t max_len) {
         char* last_slash = strrchr(exe_dir, '/');
         if (last_slash) {
             *last_slash = '\0';
-            snprintf(out_path, max_len, "%.490s/lib/runtime.s", exe_dir);
+            snprintf(out_path, max_len, "%.490s/lib/%s", exe_dir, rt_name);
             f = fopen(out_path, "rb");
             if (f) {
                 fclose(f);
                 return;
             }
-            snprintf(out_path, max_len, "%.490s/../lib/runtime.s", exe_dir);
+            snprintf(out_path, max_len, "%.490s/../lib/%s", exe_dir, rt_name);
             f = fopen(out_path, "rb");
             if (f) {
                 fclose(f);
@@ -485,7 +494,7 @@ static void get_runtime_path(char* out_path, size_t max_len) {
             }
         }
     }
-    strncpy(out_path, "lib/runtime.s", max_len - 1);
+    snprintf(out_path, max_len, "lib/%s", rt_name);
     out_path[max_len - 1] = '\0';
 #endif
     // Si no se encuentra en disco, extraer el runtime embebido en el propio binario
@@ -575,6 +584,7 @@ static int resolve_source_file(const char* raw, char* resolved, size_t max_len) 
 }
 
 int main(int argc, char* argv[]) {
+    diag_init();
     arch_init();
 
     for (int i = 1; i < argc; i++) {
@@ -674,9 +684,12 @@ int main(int argc, char* argv[]) {
             }
             preprocessor_define(d_name, d_val);
         } else if (strcmp(argv[i], "-m32") == 0) {
-            // Aceptado explicitamente para arquitectura x86 32-bit
+            arch_set_target_bits(32);
+            generator_set_target_bits(32);
         } else if (strcmp(argv[i], "-m64") == 0) {
-            printf("[Itsuki Info] Itsuki genera ejecutables x86 (32 bits), compatibles de forma transparente con sistemas de 64 bits (WOW64 en Windows y multilib en Linux).\n");
+            arch_set_target_bits(64);
+            generator_set_target_bits(64);
+            printf("[Itsuki] Modo de generacion de codigo nativo x86_64 activado (-m64).\n");
         } else if (strncmp(argv[i], "-l", 2) == 0 || strncmp(argv[i], "-L", 2) == 0 || strncmp(argv[i], "-I", 2) == 0) {
             if (linker_flag_count < 64) {
                 strncpy(linker_flags[linker_flag_count], argv[i], 255);
@@ -738,6 +751,7 @@ int main(int argc, char* argv[]) {
             parser_reset();
             Lexer* l = init_lexer(sc);
             Parser* p = init_parser(l);
+            parser_set_context(p, source_files[scanned_idx], sc);
             ASTNode* a = parser_parse(p);
             (void)a;
             
@@ -789,7 +803,12 @@ int main(int argc, char* argv[]) {
             parser_reset();
             Lexer* l = init_lexer(sc);
             Parser* p = init_parser(l);
+            parser_set_context(p, source_files[i], sc);
             ASTNode* a = parser_parse(p);
+            if (!a) {
+                free(sc);
+                return 1;
+            }
             printf("--- AST (%s) ---\n", source_files[i]);
             print_ast(a, 0);
             free(sc);
@@ -811,10 +830,20 @@ int main(int argc, char* argv[]) {
             parser_reset();
             Lexer* l = init_lexer(sc);
             Parser* p = init_parser(l);
+            parser_set_context(p, source_files[i], sc);
             ASTNode* a = parser_parse(p);
+            if (!a) {
+                free(sc);
+                return 1;
+            }
             generator_set_opt_level(opt_level);
+            generator_set_context(source_files[i], sc);
             generate_code(a, out_asm);
-            printf("[Itsuki] Codigo ensamblador x86 generado: %s\n", out_asm);
+            int opts = generator_get_peephole_optimizations_count();
+            if (opts > 0 && opt_level >= 1) {
+                printf("[Itsuki Optimizer] Optimizador por mirilla aplico %d optimizaciones.\n", opts);
+            }
+            printf("[Itsuki] Codigo ensamblador %s generado: %s\n", generator_get_target_bits() == 64 ? "x86_64" : "x86", out_asm);
             free(sc);
         }
         return 0;
@@ -848,8 +877,18 @@ int main(int argc, char* argv[]) {
         parser_reset();
         Lexer* l = init_lexer(sc);
         Parser* p = init_parser(l);
+        parser_set_context(p, source_files[i], sc);
         ASTNode* a = parser_parse(p);
+        if (!a) {
+            free(sc);
+            return 1;
+        }
+        generator_set_context(source_files[i], sc);
         generate_code(a, tmp_asm_files[asm_count]);
+        int opts = generator_get_peephole_optimizations_count();
+        if (opts > 0 && opt_level >= 1) {
+            printf("[Itsuki Optimizer] Optimizador por mirilla aplico %d optimizaciones en %s.\n", opts, source_files[i]);
+        }
         free(sc);
         asm_count++;
     }
@@ -877,7 +916,9 @@ int main(int argc, char* argv[]) {
     const ArchConfig* arch = arch_get_current();
     const char* gpath = (arch->gcc_path[0] != '\0') ? arch->gcc_path : "gcc";
     int pos = 0;
-    if (arch->gcc_flags[0] != '\0') {
+    if (generator_get_target_bits() == 64) {
+        pos = snprintf(gcc_cmd, sizeof(gcc_cmd), "%s -m64", gpath);
+    } else if (arch->gcc_flags[0] != '\0') {
         pos = snprintf(gcc_cmd, sizeof(gcc_cmd), "%s %s", gpath, arch->gcc_flags);
     } else {
         pos = snprintf(gcc_cmd, sizeof(gcc_cmd), "%s", gpath);
@@ -901,7 +942,7 @@ int main(int argc, char* argv[]) {
         pos += snprintf(gcc_cmd + pos, sizeof(gcc_cmd) - pos, " %s", opt_flag);
     }
 #ifdef _WIN32
-    pos += snprintf(gcc_cmd + pos, sizeof(gcc_cmd) - pos, " \"%s\" -o \"%s\" -s -Wl,--gc-sections -lkernel32", runtime_path, target_exe);
+    pos += snprintf(gcc_cmd + pos, sizeof(gcc_cmd) - pos, " \"%s\" -o \"%s\" -s -Wl,--gc-sections -lkernel32 -lm", runtime_path, target_exe);
 #else
     pos += snprintf(gcc_cmd + pos, sizeof(gcc_cmd) - pos, " \"%s\" -o \"%s\" -s -Wl,--gc-sections -lm", runtime_path, target_exe);
 #endif

@@ -2,6 +2,7 @@
 #include "parser.h"
 #include "embedded_lib.h"
 #include "package_manager.h"
+#include "diagnostics.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -987,8 +988,8 @@ static int try_resolve_file(const char* base_dir, const char* name, int is_syste
     // Compatibilidad transparente con encabezados estandar de C
     const char* effective_name = name;
     if (is_system_include) {
-        if (strcmp(name, "stdio.h") == 0 || strcmp(name, "stdio") == 0 ||
-            strcmp(name, "stdlib.h") == 0 || strcmp(name, "stdlib") == 0 ||
+        if (strcmp(name, "stdio.h") == 0 ||
+            strcmp(name, "stdlib.h") == 0 ||
             strcmp(name, "string.h") == 0 || strcmp(name, "time.h") == 0) {
             effective_name = "c.huki";
         } else if (strcmp(name, "math.h") == 0) {
@@ -997,32 +998,12 @@ static int try_resolve_file(const char* base_dir, const char* name, int is_syste
     }
 
     int has_ext = (strchr(effective_name, '.') != NULL);
+    if (!has_ext) return 0;
 
     if (is_system_include) {
         // 1. Directivas <...>: buscar primero en librerias estandar integradas (embebidas)
         if (has_embedded_file(effective_name)) {
             snprintf(out_path, 512, "embedded:%.490s", effective_name);
-            return 1;
-        }
-        char with_ext[256];
-        snprintf(with_ext, sizeof(with_ext), "%.240s.huki", effective_name);
-        if (has_embedded_file(with_ext)) {
-            snprintf(out_path, 512, "embedded:%.490s", with_ext);
-            return 1;
-        }
-        snprintf(with_ext, sizeof(with_ext), "%.240s.suki", effective_name);
-        if (has_embedded_file(with_ext)) {
-            snprintf(out_path, 512, "embedded:%.490s", with_ext);
-            return 1;
-        }
-        snprintf(with_ext, sizeof(with_ext), "%.240s.hu", effective_name);
-        if (has_embedded_file(with_ext)) {
-            snprintf(out_path, 512, "embedded:%.490s", with_ext);
-            return 1;
-        }
-        snprintf(with_ext, sizeof(with_ext), "%.240s.su", effective_name);
-        if (has_embedded_file(with_ext)) {
-            snprintf(out_path, 512, "embedded:%.490s", with_ext);
             return 1;
         }
 
@@ -1063,25 +1044,12 @@ static int try_resolve_file(const char* base_dir, const char* name, int is_syste
 #endif
 
         for (int d = 0; d < search_dir_count; d++) {
-            if (has_ext) {
-                snprintf(cand_lib, sizeof(cand_lib), "%s/%s", base_search_dirs[d], name);
-                FILE* test = fopen(cand_lib, "rb");
-                if (test != NULL) {
-                    fclose(test);
-                    normalize_path(cand_lib, out_path, 512);
-                    return 1;
-                }
-            } else {
-                const char* lib_exts[] = {".huki", ".suki", ".hu", ".su", NULL};
-                for (int e = 0; lib_exts[e] != NULL; e++) {
-                    snprintf(cand_lib, sizeof(cand_lib), "%s/%s%s", base_search_dirs[d], name, lib_exts[e]);
-                    FILE* test = fopen(cand_lib, "rb");
-                    if (test != NULL) {
-                        fclose(test);
-                        normalize_path(cand_lib, out_path, 512);
-                        return 1;
-                    }
-                }
+            snprintf(cand_lib, sizeof(cand_lib), "%.500s/%.255s", base_search_dirs[d], effective_name);
+            FILE* test = fopen(cand_lib, "rb");
+            if (test != NULL) {
+                fclose(test);
+                normalize_path(cand_lib, out_path, 512);
+                return 1;
             }
         }
 
@@ -1091,22 +1059,11 @@ static int try_resolve_file(const char* base_dir, const char* name, int is_syste
 
     // Directivas con comillas: #include "archivo.huki"
     // Busca en la ruta local del archivo o ruta especificada
-    char candidates[16][1024];
+    char candidates[4][1024];
     int cand_count = 0;
-    if (has_ext) {
-        snprintf(candidates[cand_count++], sizeof(candidates[0]), "%s/%s", base_dir, name);
-        snprintf(candidates[cand_count++], sizeof(candidates[0]), "%s", name);
-    } else {
-        snprintf(candidates[cand_count++], sizeof(candidates[0]), "%s/%s.huki", base_dir, name);
-        snprintf(candidates[cand_count++], sizeof(candidates[0]), "%s/%s.suki", base_dir, name);
-        snprintf(candidates[cand_count++], sizeof(candidates[0]), "%s/%s.hu", base_dir, name);
-        snprintf(candidates[cand_count++], sizeof(candidates[0]), "%s/%s.su", base_dir, name);
-        snprintf(candidates[cand_count++], sizeof(candidates[0]), "%s.huki", name);
-        snprintf(candidates[cand_count++], sizeof(candidates[0]), "%s.suki", name);
-        snprintf(candidates[cand_count++], sizeof(candidates[0]), "%s.hu", name);
-        snprintf(candidates[cand_count++], sizeof(candidates[0]), "%s.su", name);
-        snprintf(candidates[cand_count++], sizeof(candidates[0]), "%s", name);
-    }
+    snprintf(candidates[cand_count++], sizeof(candidates[0]), "%s/%s", base_dir, effective_name);
+    snprintf(candidates[cand_count++], sizeof(candidates[0]), "%s", effective_name);
+
     for (int i = 0; i < cand_count; i++) {
         FILE* test = fopen(candidates[i], "rb");
         if (test != NULL) {
@@ -1117,11 +1074,11 @@ static int try_resolve_file(const char* base_dir, const char* name, int is_syste
     }
 
     // Fallback si no se encontro localmente: verificar paquetes instalados o embebidos
-    if (pkg_resolve_include(name, 0, out_path, 512)) {
+    if (pkg_resolve_include(effective_name, 0, out_path, 512)) {
         return 1;
     }
-    if (has_embedded_file(name)) {
-        snprintf(out_path, 512, "embedded:%.490s", name);
+    if (has_embedded_file(effective_name)) {
+        snprintf(out_path, 512, "embedded:%.490s", effective_name);
         return 1;
     }
 
@@ -1537,6 +1494,30 @@ static void preprocess_internal(const char* source, const char* filepath, Buffer
                 free(clean_args);
 
                 if (inc_name[0] != '\0') {
+                    // Exigir extensión explícita (p. ej. '.huki')
+                    if (strrchr(inc_name, '.') == NULL) {
+                        char delim_open = is_system_include ? '<' : '"';
+                        char delim_close = is_system_include ? '>' : '"';
+                        char msg[1024];
+                        char help[1024];
+                        snprintf(msg, sizeof(msg),
+                                 "la directiva #%s %c%s%c requiere la extension '.huki'",
+                                 is_import_directive ? "import" : "include",
+                                 delim_open, inc_name, delim_close);
+                        snprintf(help, sizeof(help),
+                                 "utilice '#%s %c%s.huki%c'",
+                                 is_import_directive ? "import" : "include",
+                                 delim_open, inc_name, delim_close);
+
+                        int col = 1;
+                        char* inc_pos = strstr(line_buf->data, inc_name);
+                        if (inc_pos) {
+                            col = (int)(inc_pos - line_buf->data) + 1;
+                        }
+                        diag_error(filepath, source, line_number, col, (int)strlen(inc_name), msg, help);
+                        exit(1);
+                    }
+
                     char resolved_path[512] = {0};
                     if (try_resolve_file(cur_dir, inc_name, is_system_include, resolved_path)) {
                         // Descubrimiento de fuentes compañeros (.huki -> .suki)
@@ -1600,12 +1581,21 @@ static void preprocess_internal(const char* source, const char* filepath, Buffer
                             buf_append_str(out, line_dir);
                         }
                     } else {
-                        printf("[Itsuki Error] No se pudo encontrar el archivo de inclusion '%s' en '%s':%d\n",
-                               inc_name, filepath, line_number);
+                        char delim_open = is_system_include ? '<' : '"';
+                        char delim_close = is_system_include ? '>' : '"';
+                        char msg[1024];
+                        snprintf(msg, sizeof(msg),
+                                 "no se pudo encontrar el archivo de inclusion %c%s%c",
+                                 delim_open, inc_name, delim_close);
+                        int col = 1;
+                        char* inc_pos = strstr(line_buf->data, inc_name);
+                        if (inc_pos) {
+                            col = (int)(inc_pos - line_buf->data) + 1;
+                        }
+                        diag_error(filepath, source, line_number, col, (int)strlen(inc_name), msg, NULL);
                         exit(1);
                     }
                 }
-                buf_append_char(out, '\n');
                 line_number++;
                 buf_free(line_buf);
                 continue;

@@ -1,8 +1,4 @@
 #!/usr/bin/env bash
-# ===========================================================
-#        ITSUKI COMPILER - INSTALADOR (LINUX)
-#    100% Espacio de Usuario - Sin requerir 'sudo' o root
-# ===========================================================
 set -e
 
 # Colores ANSI
@@ -21,9 +17,25 @@ echo ""
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
-# -----------------------------------------------------------
-# [1/5] 20% Deteccion de arquitectura y GCC
-# -----------------------------------------------------------
+# Modo desinstalacion
+if [ "$1" = "--uninstall" ] || [ "$1" = "uninstall" ] || [ "$1" = "-u" ]; then
+    TARGET_HOME="${HOME:-/tmp}"
+    if [ -n "$SUDO_USER" ] && [ "$SUDO_USER" != "root" ]; then
+        TARGET_HOME=$(getent passwd "$SUDO_USER" 2>/dev/null | cut -d: -f6 || echo "/home/$SUDO_USER")
+    fi
+    INSTALL_DIR="$TARGET_HOME/.itsuki"
+    echo -e "${YELLOW}Desinstalando Itsuki de $INSTALL_DIR...${NC}"
+    rm -rf "$INSTALL_DIR"
+    for rc in "$TARGET_HOME/.bashrc" "$TARGET_HOME/.zshrc" "$TARGET_HOME/.profile"; do
+        if [ -f "$rc" ]; then
+            sed -i '/# Itsuki Programming Language/d' "$rc" 2>/dev/null || true
+            sed -i '/\.itsuki\/bin/d' "$rc" 2>/dev/null || true
+        fi
+    done
+    echo -e "${GREEN}[OK] Itsuki ha sido desinstalado exitosamente de tu sistema.${NC}"
+    exit 0
+fi
+
 echo -e "${YELLOW} [====----------------]  20%  Detectando arquitectura de la PC...${NC}"
 HOST_RAW=$(uname -m)
 case "$HOST_RAW" in
@@ -77,9 +89,6 @@ if command -v gcc >/dev/null 2>&1; then
     fi
 fi
 
-# -----------------------------------------------------------
-# [2/5] 40% Localizar archivos
-# -----------------------------------------------------------
 echo -e "${YELLOW} [========------------]  40%  Localizando archivos del compilador...${NC}"
 BIN_SRC=""
 for cand in "$SCRIPT_DIR/itsuki" "$SCRIPT_DIR/build/itsuki" "$SCRIPT_DIR/build/linux/itsuki" "$SCRIPT_DIR/linux/itsuki"; do
@@ -102,10 +111,6 @@ for cand in "$SCRIPT_DIR/lib" "$SCRIPT_DIR/linux/lib" "$SCRIPT_DIR/build/linux/l
     fi
 done
 
-# -----------------------------------------------------------
-# [3/5] 60% Preparar carpetas en espacio de usuario (~/.itsuki)
-# Sin requerir 'sudo' ni permisos de administrador
-# -----------------------------------------------------------
 echo -e "${YELLOW} [============--------]  60%  Preparando directorios del sistema (~/.itsuki)...${NC}"
 TARGET_HOME="${HOME:-/tmp}"
 if [ -n "$SUDO_USER" ] && [ "$SUDO_USER" != "root" ]; then
@@ -120,9 +125,6 @@ PKG_DIR="$INSTALL_DIR/packages"
 
 mkdir -p "$BIN_DIR" "$LIB_DIR" "$CONFIG_DIR" "$PKG_DIR"
 
-# -----------------------------------------------------------
-# [4/5] 80% Copiar binario y generar arch.conf
-# -----------------------------------------------------------
 echo -e "${YELLOW} [================----]  80%  Instalando binario, librerias y arch.conf...${NC}"
 cp -f "$BIN_SRC" "$BIN_DIR/itsuki"
 chmod +x "$BIN_DIR/itsuki"
@@ -132,10 +134,8 @@ if [ -n "$LIB_SRC" ]; then
 fi
 
 cat << EOF > "$CONFIG_DIR/arch.conf"
-# ===========================================================
 #      ITSUKI PROGRAMMING LANGUAGE - ARCH CONFIG
-#   Generado automaticamente durante la instalacion Linux
-# ===========================================================
+
 os_name=linux
 os_bits=$OS_BITS
 host_arch=$HOST_ARCH_NAME
@@ -157,9 +157,6 @@ echo "[OK] Itsuki ha sido desinstalado correctamente de tu usuario."
 EOF
 chmod +x "$UNINSTALL_PATH"
 
-# -----------------------------------------------------------
-# [5/5] 100% Configurar PATH
-# -----------------------------------------------------------
 echo -e "${GREEN} [====================] 100%  Configurando variable de entorno PATH...${NC}"
 PATH_LINE="export PATH=\"\$HOME/.itsuki/bin:\$PATH\""
 for rc in "$TARGET_HOME/.bashrc" "$TARGET_HOME/.zshrc" "$TARGET_HOME/.profile"; do
@@ -185,5 +182,7 @@ echo -e "  Comandos para comenzar:"
 echo -e "    ${CYAN}itsuki run archivo.suki${NC}   Compilar y ejecutar"
 echo -e "    ${CYAN}itsuki doctor${NC}             Ver estado del entorno"
 echo -e "    ${CYAN}itsuki --help${NC}             Ver todas las opciones"
+echo -e "  Para desinstalar:"
+echo -e "    ${CYAN}bash install.sh --uninstall${NC} o ${CYAN}~/.itsuki/uninstall.sh${NC}"
 echo -e "${GREEN}=======================================================${NC}"
 echo ""

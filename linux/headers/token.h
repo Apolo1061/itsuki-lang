@@ -5,6 +5,7 @@ typedef enum {
     TOKEN_EOF = 0,
     TOKEN_IDENTIFIER,
     TOKEN_NUMBER,
+    TOKEN_FLOAT_LITERAL,
     TOKEN_STRING,
 
     // Palabras clave y directivas
@@ -18,6 +19,15 @@ typedef enum {
     TOKEN_FN,          // fn
     TOKEN_RETURN,      // return
     TOKEN_INT,         // int
+    TOKEN_FLOAT,       // float
+    TOKEN_DOUBLE,      // double
+    TOKEN_INT64,       // int64
+    TOKEN_UINT64,      // uint64
+    TOKEN_UINT32,      // uint32
+    TOKEN_UINT16,      // uint16
+    TOKEN_UINT8,       // uint8
+    TOKEN_INT16,       // int16
+    TOKEN_INT8,        // int8
     TOKEN_VOID,        // void
     TOKEN_CHAR,        // char
     TOKEN_STRING_TYPE, // string
@@ -112,6 +122,7 @@ typedef struct {
     TokenType type;
     char* value;
     int line;
+    int column;
 } Token;
 
 #endif // TOKEN_H

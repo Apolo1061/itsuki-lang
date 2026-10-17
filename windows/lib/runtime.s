@@ -30,6 +30,10 @@
 .globl _fundamental_println_empty
 .globl _fundamental_print_int
 .globl _fundamental_println_int
+.globl _fundamental_print_float
+.globl fundamental_print_float
+.globl _fundamental_println_float
+.globl fundamental_println_float
 .globl _fundamental_read_str
 .globl _fundamental_read_int
 
@@ -476,6 +480,91 @@ _fundamental_println_int:
     pop ebp
     ret
 
+# _fundamental_print_float(double val)
+_fundamental_print_float:
+fundamental_print_float:
+    push ebp
+    mov ebp, esp
+    sub esp, 32
+
+    fld qword ptr [ebp + 8]
+    ftst
+    fnstsw ax
+    sahf
+    jnc .flt_positive
+    mov byte ptr [one_char_buf], '-'
+    mov eax, offset one_char_buf
+    mov edx, 1
+    call _write_raw
+    fchs
+
+.flt_positive:
+    fld st(0)
+    fnstcw [ebp - 4]
+    mov ax, [ebp - 4]
+    or ax, 0x0C00
+    mov [ebp - 8], ax
+    fldcw [ebp - 8]
+    fistp qword ptr [ebp - 16]
+    fldcw [ebp - 4]
+
+    mov eax, [ebp - 16]
+    call _int_to_str
+    call _write_raw
+
+    mov byte ptr [one_char_buf], '.'
+    mov eax, offset one_char_buf
+    mov edx, 1
+    call _write_raw
+
+    fild qword ptr [ebp - 16]
+    fsubp st(1), st(0)
+    
+    mov dword ptr [ebp - 20], 1000000
+    fild dword ptr [ebp - 20]
+    fmulp st(1), st(0)
+
+    fistp qword ptr [ebp - 16]
+
+    mov eax, [ebp - 16]
+    test eax, eax
+    jns .frac_pos
+    neg eax
+.frac_pos:
+    mov ecx, 6
+    mov edi, offset int_conv_buf
+    add edi, 5
+.frac_digit_loop:
+    xor edx, edx
+    mov ebx, 10
+    div ebx
+    add dl, '0'
+    mov [edi], dl
+    dec edi
+    dec ecx
+    jnz .frac_digit_loop
+
+    mov eax, offset int_conv_buf
+    mov edx, 6
+    call _write_raw
+
+    mov esp, ebp
+    pop ebp
+    ret
+
+# _fundamental_println_float(double val)
+_fundamental_println_float:
+fundamental_println_float:
+    push ebp
+    mov ebp, esp
+    push dword ptr [ebp + 12]
+    push dword ptr [ebp + 8]
+    call _fundamental_print_float
+    add esp, 8
+    call _fundamental_println_empty
+    pop ebp
+    ret
+
 # _fundamental_printf(char* format, ...)
 # Implementacion 100% nativa en ensamblador x86 independiente de libc
 _fundamental_printf:
@@ -511,6 +600,8 @@ _printf:
     je .fmt_int
     cmp al, 'i'
     je .fmt_int
+    cmp al, 'f'
+    je .fmt_float
     cmp al, 'u'
     je .fmt_uint
     cmp al, 'x'
@@ -544,6 +635,16 @@ _printf:
     add ebx, 4
     call _int_to_str
     call _printf_append
+    inc esi
+    jmp .printf_loop
+
+.fmt_float:
+    call _printf_flush
+    push dword ptr [ebx + 4]
+    push dword ptr [ebx]
+    call _fundamental_print_float
+    add esp, 8
+    add ebx, 8
     inc esi
     jmp .printf_loop
 

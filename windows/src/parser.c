@@ -1,6 +1,7 @@
 #include "parser.h"
 #include "embedded_lib.h"
 #include "package_manager.h"
+#include "diagnostics.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -10,6 +11,7 @@ ASTNode* create_ast_node(ASTNodeType type, int line) {
     ASTNode* node = calloc(1, sizeof(ASTNode));
     node->type = type;
     node->line = line;
+    node->column = 1;
     return node;
 }
 
@@ -22,10 +24,18 @@ Parser* init_parser(Lexer* lexer) {
     parser->current_token = lexer_get_next_token(lexer);
     parser->peek_token = NULL;
     parser->current_namespace = NULL;
+    parser->filename = NULL;
+    parser->source_code = NULL;
     add_known_namespace("fundamental");
     add_known_struct("fundamental::string");
     add_known_struct("string");
     return parser;
+}
+
+void parser_set_context(Parser* parser, const char* filename, const char* source_code) {
+    if (!parser) return;
+    parser->filename = filename;
+    parser->source_code = source_code;
 }
 
 Token* parser_peek_token(Parser* parser) {
@@ -33,6 +43,55 @@ Token* parser_peek_token(Parser* parser) {
         parser->peek_token = lexer_get_next_token(parser->lexer);
     }
     return parser->peek_token;
+}
+
+static const char* token_type_name(TokenType type) {
+    switch (type) {
+        case TOKEN_INT: return "'int'";
+        case TOKEN_FLOAT: return "'float'";
+        case TOKEN_DOUBLE: return "'double'";
+        case TOKEN_INT64: return "'int64'";
+        case TOKEN_UINT64: return "'uint64'";
+        case TOKEN_UINT32: return "'uint32'";
+        case TOKEN_UINT16: return "'uint16'";
+        case TOKEN_UINT8: return "'uint8'";
+        case TOKEN_INT16: return "'int16'";
+        case TOKEN_INT8: return "'int8'";
+        case TOKEN_CHAR: return "'char'";
+        case TOKEN_VOID: return "'void'";
+        case TOKEN_BOOL: return "'bool'";
+        case TOKEN_STRING_TYPE: return "'string'";
+        case TOKEN_IDENTIFIER: return "identificador";
+        case TOKEN_NUMBER: return "numero entero";
+        case TOKEN_FLOAT_LITERAL: return "numero flotante";
+        case TOKEN_STRING: return "cadena literal";
+        case TOKEN_SEMICOLON: return "';'";
+        case TOKEN_COLON: return "':'";
+        case TOKEN_COLON_COLON: return "'::'";
+        case TOKEN_COMMA: return "','";
+        case TOKEN_ASSIGN: return "'='";
+        case TOKEN_LPAREN: return "'('";
+        case TOKEN_RPAREN: return "')'";
+        case TOKEN_LBRACE: return "'{'";
+        case TOKEN_RBRACE: return "'}'";
+        case TOKEN_LBRACKET: return "'['";
+        case TOKEN_RBRACKET: return "']'";
+        case TOKEN_LANGLE: return "'<'";
+        case TOKEN_RANGLE: return "'>'";
+        case TOKEN_ARROW: return "'->'";
+        case TOKEN_RETURN: return "'return'";
+        case TOKEN_IF: return "'if'";
+        case TOKEN_ELSE: return "'else'";
+        case TOKEN_WHILE: return "'while'";
+        case TOKEN_FOR: return "'for'";
+        case TOKEN_FN: return "'fn'";
+        case TOKEN_STRUCT: return "'struct'";
+        case TOKEN_UNION: return "'union'";
+        case TOKEN_ENUM: return "'enum'";
+        case TOKEN_CLASS: return "'class'";
+        case TOKEN_EOF: return "fin de archivo";
+        default: return "token";
+    }
 }
 
 void parser_eat(Parser* parser, TokenType type) {
@@ -46,8 +105,25 @@ void parser_eat(Parser* parser, TokenType type) {
             parser->current_token = lexer_get_next_token(parser->lexer);
         }
     } else {
-        printf("Error de sintaxis: se esperaba token %d pero se encontro '%s' (tipo %d) en la linea %d\n",
-               type, parser->current_token->value, parser->current_token->type, parser->current_token->line);
+        char msg[256];
+        char suggestion[256];
+        snprintf(msg, sizeof(msg), "se esperaba %s pero se encontro '%s'",
+                 token_type_name(type), parser->current_token->value ? parser->current_token->value : "");
+        if (type == TOKEN_SEMICOLON) {
+            snprintf(suggestion, sizeof(suggestion), "coloca un punto y coma ';' al final de la instruccion");
+        } else if (type == TOKEN_RPAREN) {
+            snprintf(suggestion, sizeof(suggestion), "cierra el parentesis con ')'");
+        } else if (type == TOKEN_RBRACE) {
+            snprintf(suggestion, sizeof(suggestion), "cierra el bloque con '}'");
+        } else if (type == TOKEN_RBRACKET) {
+            snprintf(suggestion, sizeof(suggestion), "cierra los corchetes con ']'");
+        } else {
+            snprintf(suggestion, sizeof(suggestion), "verifica la sintaxis de la expresion o sentencia");
+        }
+        int col = parser->current_token->column > 0 ? parser->current_token->column : 1;
+        int tlen = parser->current_token->value ? (int)strlen(parser->current_token->value) : 1;
+        if (tlen <= 0) tlen = 1;
+        diag_error(parser->filename, parser->source_code, parser->current_token->line, col, tlen, msg, suggestion);
         exit(1);
     }
 }
@@ -72,7 +148,11 @@ char* parser_parse_scoped_identifier(Parser* parser) {
             next_id = strdup(parser->current_token->value);
             parser_eat(parser, parser->current_token->type);
         } else {
-            printf("Error de sintaxis: se esperaba identificador despues de '::' en la linea %d\n", parser->current_token->line);
+            diag_error(parser->filename, parser->source_code, parser->current_token->line,
+                       parser->current_token->column > 0 ? parser->current_token->column : 1,
+                       (int)strlen(parser->current_token->value),
+                       "se esperaba un identificador despues de '::'",
+                       "asegurate de indicar un miembro o tipo valido perteneciente al espacio de nombres");
             exit(1);
         }
         char* combined = malloc(strlen(id) + 2 + strlen(next_id) + 1);
@@ -646,6 +726,13 @@ static int is_known_typedef(const char* alias) {
     return 0;
 }
 
+static int is_primitive_type_token(TokenType t) {
+    return (t == TOKEN_INT || t == TOKEN_CHAR || t == TOKEN_VOID || t == TOKEN_BOOL ||
+            t == TOKEN_STRING_TYPE || t == TOKEN_FLOAT || t == TOKEN_DOUBLE ||
+            t == TOKEN_INT64 || t == TOKEN_UINT64 || t == TOKEN_UINT32 ||
+            t == TOKEN_UINT16 || t == TOKEN_UINT8 || t == TOKEN_INT16 || t == TOKEN_INT8);
+}
+
 char* parser_parse_type(Parser* parser) {
     int has_const = 0;
     if (parser->current_token->type == TOKEN_CONST) {
@@ -684,11 +771,7 @@ char* parser_parse_type(Parser* parser) {
         } else {
             tname = parser_parse_scoped_identifier(parser);
         }
-    } else if (parser->current_token->type == TOKEN_INT ||
-        parser->current_token->type == TOKEN_VOID ||
-        parser->current_token->type == TOKEN_CHAR ||
-        parser->current_token->type == TOKEN_BOOL ||
-        parser->current_token->type == TOKEN_STRING_TYPE) {
+    } else if (is_primitive_type_token(parser->current_token->type)) {
         tname = strdup(parser->current_token->value);
         parser_eat(parser, parser->current_token->type);
     } else if (parser->current_token->type == TOKEN_IDENTIFIER) {
@@ -714,8 +797,13 @@ char* parser_parse_type(Parser* parser) {
             tname = parser_parse_scoped_identifier(parser);
         }
     } else {
-        printf("Error de sintaxis: se esperaba un tipo en la linea %d (se encontro '%s')\n",
-               parser->current_token->line, parser->current_token->value);
+        char msg[256];
+        snprintf(msg, sizeof(msg), "se esperaba un tipo pero se encontro '%s'", parser->current_token->value ? parser->current_token->value : "");
+        diag_error(parser->filename, parser->source_code, parser->current_token->line,
+                   parser->current_token->column > 0 ? parser->current_token->column : 1,
+                   parser->current_token->value ? (int)strlen(parser->current_token->value) : 1,
+                   msg,
+                   "usa un tipo valido como int, float, double, char, void, string o el nombre de una estructura");
         exit(1);
     }
     
@@ -772,11 +860,10 @@ static int is_type_start(Parser* parser) {
     TokenType t = parser->current_token->type;
     if (t == TOKEN_CONST) {
         Lexer saved_l = *(parser->lexer);
-        Token* saved_t = init_token(parser->current_token->type, strdup(parser->current_token->value), parser->current_token->line);
+        Token* saved_t = init_token(parser->current_token->type, strdup(parser->current_token->value), parser->current_token->line, parser->current_token->column);
         Token* next_t = lexer_get_next_token(parser->lexer);
         int is_type = 0;
-        if (next_t->type == TOKEN_INT || next_t->type == TOKEN_CHAR || next_t->type == TOKEN_VOID ||
-            next_t->type == TOKEN_BOOL || next_t->type == TOKEN_STRING_TYPE ||
+        if (is_primitive_type_token(next_t->type) ||
             next_t->type == TOKEN_STRUCT || next_t->type == TOKEN_UNION || next_t->type == TOKEN_ENUM ||
             next_t->type == TOKEN_CLASS) {
             is_type = 1;
@@ -796,7 +883,7 @@ static int is_type_start(Parser* parser) {
         parser->current_token = saved_t;
         return is_type;
     }
-    if (t == TOKEN_INT || t == TOKEN_CHAR || t == TOKEN_VOID || t == TOKEN_BOOL || t == TOKEN_STRING_TYPE) {
+    if (is_primitive_type_token(t)) {
         return 1;
     }
     if (t == TOKEN_STRUCT || t == TOKEN_UNION || t == TOKEN_ENUM || t == TOKEN_CLASS) {
@@ -810,7 +897,7 @@ static int is_type_start(Parser* parser) {
         }
         if (is_known_namespace(parser->current_token->value)) {
             Lexer saved_lexer = *(parser->lexer);
-            Token* saved_token = init_token(parser->current_token->type, strdup(parser->current_token->value), parser->current_token->line);
+            Token* saved_token = init_token(parser->current_token->type, strdup(parser->current_token->value), parser->current_token->line, parser->current_token->column);
             
             Token* next_tok = lexer_get_next_token(parser->lexer);
             int is_type = 0;
@@ -848,7 +935,7 @@ static int is_struct_or_union_def(Parser* parser) {
         parser->current_token->type != TOKEN_UNION &&
         parser->current_token->type != TOKEN_CLASS) return 0;
     Lexer saved_l = *(parser->lexer);
-    Token* saved_t = init_token(parser->current_token->type, strdup(parser->current_token->value), parser->current_token->line);
+    Token* saved_t = init_token(parser->current_token->type, strdup(parser->current_token->value), parser->current_token->line, parser->current_token->column);
     Token* t1 = lexer_get_next_token(parser->lexer);
     int is_def = 0;
     if (t1->type == TOKEN_LBRACE) {
@@ -868,7 +955,7 @@ static int is_struct_or_union_def(Parser* parser) {
 static int is_enum_def(Parser* parser) {
     if (parser->current_token->type != TOKEN_ENUM) return 0;
     Lexer saved_l = *(parser->lexer);
-    Token* saved_t = init_token(parser->current_token->type, strdup(parser->current_token->value), parser->current_token->line);
+    Token* saved_t = init_token(parser->current_token->type, strdup(parser->current_token->value), parser->current_token->line, parser->current_token->column);
     Token* t1 = lexer_get_next_token(parser->lexer);
     int is_def = 0;
     if (t1->type == TOKEN_LBRACE) {
@@ -951,6 +1038,21 @@ ASTNode* parser_parse_import(Parser* parser) {
     if (parser->current_token->type == TOKEN_SEMICOLON) {
         parser_eat(parser, TOKEN_SEMICOLON);
     }
+
+    if (strrchr(import_name, '.') == NULL) {
+        char delim_open = is_system ? '<' : '"';
+        char delim_close = is_system ? '>' : '"';
+        char msg[256];
+        char help[256];
+        snprintf(msg, sizeof(msg),
+                 "la directiva de inclusion %c%s%c requiere la extension '.huki'",
+                 delim_open, import_name, delim_close);
+        snprintf(help, sizeof(help),
+                 "utilice '%c%s.huki%c'",
+                 delim_open, import_name, delim_close);
+        diag_error(parser->filename, parser->source_code, line, 1, (int)strlen(import_name), msg, help);
+        exit(1);
+    }
     
     ASTNode* node = create_ast_node(AST_IMPORT, line);
     node->name = import_name;
@@ -962,65 +1064,16 @@ ASTNode* parser_parse_import(Parser* parser) {
         // Directivas <...>: buscar en embebidos, lib/ o paquetes instalados
         if (has_embedded_file(import_name)) {
             snprintf(import_path, sizeof(import_path), "embedded:%s", import_name);
+        } else if (pkg_resolve_include(import_name, 1, import_path, sizeof(import_path))) {
+            check_file = fopen(import_path, "r");
         } else {
-            char tmp_chk[256];
-            snprintf(tmp_chk, sizeof(tmp_chk), "%s.huki", import_name);
-            if (has_embedded_file(tmp_chk)) {
-                snprintf(import_path, sizeof(import_path), "embedded:%s", tmp_chk);
-            } else {
-                snprintf(tmp_chk, sizeof(tmp_chk), "%s.suki", import_name);
-                if (has_embedded_file(tmp_chk)) {
-                    snprintf(import_path, sizeof(import_path), "embedded:%s", tmp_chk);
-                } else {
-                    snprintf(tmp_chk, sizeof(tmp_chk), "%s.hu", import_name);
-                    if (has_embedded_file(tmp_chk)) {
-                        snprintf(import_path, sizeof(import_path), "embedded:%s", tmp_chk);
-                    } else {
-                        snprintf(tmp_chk, sizeof(tmp_chk), "%s.su", import_name);
-                        if (has_embedded_file(tmp_chk)) {
-                            snprintf(import_path, sizeof(import_path), "embedded:%s", tmp_chk);
-                        }
-                    }
-                }
-            }
-        }
-
-        if (import_path[0] == '\0') {
-            if (pkg_resolve_include(import_name, 1, import_path, sizeof(import_path))) {
-                check_file = fopen(import_path, "r");
-            }
-        }
-
-        if (check_file == NULL && import_path[0] == '\0') {
-            if (strchr(import_name, '.') != NULL) {
-                sprintf(import_path, "lib/%s", import_name);
-                check_file = fopen(import_path, "r");
-            } else {
-                const char* lib_exts[] = {".huki", ".suki", ".hu", ".su", NULL};
-                for (int e = 0; lib_exts[e] != NULL; e++) {
-                    sprintf(import_path, "lib/%s%s", import_name, lib_exts[e]);
-                    check_file = fopen(import_path, "r");
-                    if (check_file) break;
-                }
-            }
+            sprintf(import_path, "lib/%s", import_name);
+            check_file = fopen(import_path, "r");
         }
     } else {
         // Directivas con comillas "...": buscar localmente
-        if (strchr(import_name, '.') != NULL) {
-            sprintf(import_path, "%s", import_name);
-            check_file = fopen(import_path, "r");
-        } else {
-            const char* loc_exts[] = {".huki", ".suki", ".hu", ".su", NULL};
-            for (int e = 0; loc_exts[e] != NULL; e++) {
-                sprintf(import_path, "%s%s", import_name, loc_exts[e]);
-                check_file = fopen(import_path, "r");
-                if (check_file) break;
-            }
-            if (!check_file) {
-                sprintf(import_path, "%s", import_name);
-                check_file = fopen(import_path, "r");
-            }
-        }
+        sprintf(import_path, "%s", import_name);
+        check_file = fopen(import_path, "r");
 
         if (check_file == NULL) {
             if (pkg_resolve_include(import_name, 0, import_path, sizeof(import_path))) {
@@ -1076,7 +1129,13 @@ ASTNode* parser_parse_import(Parser* parser) {
             }
         }
     } else {
-        printf("Error: no se pudo encontrar el archivo de inclusion '%s' en la linea %d\n", import_name, line);
+        char delim_open = is_system ? '<' : '"';
+        char delim_close = is_system ? '>' : '"';
+        char msg[256];
+        snprintf(msg, sizeof(msg),
+                 "no se pudo encontrar el archivo de inclusion %c%s%c",
+                 delim_open, import_name, delim_close);
+        diag_error(parser->filename, parser->source_code, line, 1, (int)strlen(import_name), msg, NULL);
         exit(1);
     }
     
@@ -1390,7 +1449,7 @@ ASTNode* parser_parse_typedef(Parser* parser) {
     
     if (parser->current_token->type == TOKEN_STRUCT) {
         Lexer saved_l = *(parser->lexer);
-        Token* saved_t = init_token(parser->current_token->type, strdup(parser->current_token->value), parser->current_token->line);
+        Token* saved_t = init_token(parser->current_token->type, strdup(parser->current_token->value), parser->current_token->line, parser->current_token->column);
         Token* t1 = lexer_get_next_token(parser->lexer);
         int has_brace = 0;
         if (t1->type == TOKEN_LBRACE) {
@@ -1427,7 +1486,7 @@ ASTNode* parser_parse_typedef(Parser* parser) {
         }
     } else if (parser->current_token->type == TOKEN_UNION) {
         Lexer saved_l = *(parser->lexer);
-        Token* saved_t = init_token(parser->current_token->type, strdup(parser->current_token->value), parser->current_token->line);
+        Token* saved_t = init_token(parser->current_token->type, strdup(parser->current_token->value), parser->current_token->line, parser->current_token->column);
         Token* t1 = lexer_get_next_token(parser->lexer);
         int has_brace = 0;
         if (t1->type == TOKEN_LBRACE) {
@@ -1464,7 +1523,7 @@ ASTNode* parser_parse_typedef(Parser* parser) {
         }
     } else if (parser->current_token->type == TOKEN_ENUM) {
         Lexer saved_l = *(parser->lexer);
-        Token* saved_t = init_token(parser->current_token->type, strdup(parser->current_token->value), parser->current_token->line);
+        Token* saved_t = init_token(parser->current_token->type, strdup(parser->current_token->value), parser->current_token->line, parser->current_token->column);
         Token* t1 = lexer_get_next_token(parser->lexer);
         int has_brace = 0;
         if (t1->type == TOKEN_LBRACE) {
@@ -1502,8 +1561,24 @@ ASTNode* parser_parse_typedef(Parser* parser) {
     }
     
     char* target_type = parser_parse_type(parser);
-    char* alias_name = strdup(parser->current_token->value);
-    parser_eat(parser, TOKEN_IDENTIFIER);
+    char* alias_name = NULL;
+    if (parser->current_token->type == TOKEN_IDENTIFIER ||
+        parser->current_token->type == TOKEN_INT8 ||
+        parser->current_token->type == TOKEN_INT16 ||
+        parser->current_token->type == TOKEN_INT ||
+        parser->current_token->type == TOKEN_INT64 ||
+        parser->current_token->type == TOKEN_UINT8 ||
+        parser->current_token->type == TOKEN_UINT16 ||
+        parser->current_token->type == TOKEN_UINT32 ||
+        parser->current_token->type == TOKEN_UINT64 ||
+        parser->current_token->type == TOKEN_FLOAT ||
+        parser->current_token->type == TOKEN_DOUBLE) {
+        alias_name = strdup(parser->current_token->value);
+        parser_eat(parser, parser->current_token->type);
+    } else {
+        alias_name = strdup(parser->current_token->value);
+        parser_eat(parser, TOKEN_IDENTIFIER);
+    }
     parser_eat(parser, TOKEN_SEMICOLON);
     
     register_typedef(alias_name, target_type);
@@ -1750,7 +1825,7 @@ static ASTNode* parser_parse_class(Parser* parser) {
                    (strcmp(parser->current_token->value, class_name) == 0 ||
                     strcmp(parser->current_token->value, "constructor") == 0)) {
             Lexer saved_l = *(parser->lexer);
-            Token* saved_t = init_token(parser->current_token->type, strdup(parser->current_token->value), parser->current_token->line);
+            Token* saved_t = init_token(parser->current_token->type, strdup(parser->current_token->value), parser->current_token->line, parser->current_token->column);
             Token* next_t = lexer_get_next_token(parser->lexer);
             if (next_t->type == TOKEN_LPAREN) {
                 is_method = 1;
@@ -1762,7 +1837,7 @@ static ASTNode* parser_parse_class(Parser* parser) {
             parser->current_token = saved_t;
         } else if (is_type_start(parser)) {
             Lexer saved_l = *(parser->lexer);
-            Token* saved_t = init_token(parser->current_token->type, strdup(parser->current_token->value), parser->current_token->line);
+            Token* saved_t = init_token(parser->current_token->type, strdup(parser->current_token->value), parser->current_token->line, parser->current_token->column);
             Token* t1 = lexer_get_next_token(parser->lexer);
             while (t1->type == TOKEN_STAR) {
                 free(t1->value); free(t1);
@@ -1987,8 +2062,25 @@ static ASTNode* parser_parse_statement_or_block(Parser* parser);
 
 static ASTNode* parser_parse_primary(Parser* parser) {
     int line = parser->current_token->line;
+    if (parser->current_token->type == TOKEN_FLOAT_LITERAL) {
+        ASTNode* node = create_ast_node(AST_FLOAT_LITERAL, line);
+        node->column = parser->current_token->column;
+        node->double_value = atof(parser->current_token->value);
+        size_t vlen = strlen(parser->current_token->value);
+        if (vlen > 0 && (parser->current_token->value[vlen - 1] == 'f' || parser->current_token->value[vlen - 1] == 'F')) {
+            node->is_float = 1;
+            node->is_double = 0;
+        } else {
+            node->is_float = 0;
+            node->is_double = 1;
+        }
+        node->string_value = strdup(parser->current_token->value);
+        parser_eat(parser, TOKEN_FLOAT_LITERAL);
+        return node;
+    }
     if (parser->current_token->type == TOKEN_NUMBER) {
         ASTNode* node = create_ast_node(AST_NUMBER, line);
+        node->column = parser->current_token->column;
         node->int_value = atoi(parser->current_token->value);
         parser_eat(parser, TOKEN_NUMBER);
         return node;
@@ -2031,6 +2123,7 @@ static ASTNode* parser_parse_primary(Parser* parser) {
         return expr;
     }
     if (parser->current_token->type == TOKEN_IDENTIFIER) {
+        int id_col = parser->current_token->column;
         TemplateDef* tpl = find_template(parser->current_token->value);
         if (tpl != NULL && parser_peek_token(parser)->type == TOKEN_LANGLE) {
             char* tpl_name = strdup(parser->current_token->value);
@@ -2050,6 +2143,7 @@ static ASTNode* parser_parse_primary(Parser* parser) {
             free(tpl_name);
 
             ASTNode* node = create_ast_node(AST_IDENTIFIER, line);
+            node->column = id_col;
             node->name = spec_name;
             return node;
         }
@@ -2085,6 +2179,7 @@ static ASTNode* parser_parse_primary(Parser* parser) {
                 free(name);
 
                 ASTNode* node = create_ast_node(AST_IDENTIFIER, line);
+                node->column = id_col;
                 node->name = spec_name;
                 return node;
             }
@@ -2095,11 +2190,17 @@ static ASTNode* parser_parse_primary(Parser* parser) {
         } else {
             node = create_ast_node(AST_IDENTIFIER, line);
         }
+        node->column = id_col;
         node->name = name;
         return node;
     }
-    printf("Error de sintaxis: expresion inesperada en la linea %d ('%s')\n",
-           parser->current_token->line, parser->current_token->value);
+    char msg[256];
+    snprintf(msg, sizeof(msg), "expresion inesperada '%s'", parser->current_token->value ? parser->current_token->value : "");
+    diag_error(parser->filename, parser->source_code, parser->current_token->line,
+               parser->current_token->column > 0 ? parser->current_token->column : 1,
+               parser->current_token->value ? (int)strlen(parser->current_token->value) : 1,
+               msg,
+               "verifica si hay un operador faltante, un parentesis sin cerrar o un identificador incorrecto");
     exit(1);
 }
 
@@ -2131,7 +2232,8 @@ static ASTNode* parser_parse_postfix(Parser* parser) {
                 }
             }
             parser_eat(parser, TOKEN_RPAREN);
-            ASTNode* call_node = create_ast_node(AST_CALL_EXPR, line);
+            ASTNode* call_node = create_ast_node(AST_CALL_EXPR, expr ? expr->line : line);
+            call_node->column = expr ? expr->column : 1;
             call_node->callee = expr;
             call_node->args = args_head;
             expr = call_node;
@@ -2139,6 +2241,7 @@ static ASTNode* parser_parse_postfix(Parser* parser) {
             TokenType access_tok = parser->current_token->type;
             parser_eat(parser, access_tok);
             char* mname = NULL;
+            int mcol = parser->current_token->column;
             if (parser->current_token->type == TOKEN_TILDE) {
                 parser_eat(parser, TOKEN_TILDE);
                 char dtor_buf[128];
@@ -2150,8 +2253,10 @@ static ASTNode* parser_parse_postfix(Parser* parser) {
                 parser_eat(parser, TOKEN_IDENTIFIER);
             }
             ASTNode* mem_node = create_ast_node(AST_MEMBER_EXPR, line);
+            mem_node->column = mcol;
             if (access_tok == TOKEN_ARROW) {
                 ASTNode* deref = create_ast_node(AST_UNARY_EXPR, line);
+                deref->column = mcol;
                 deref->op = '*';
                 deref->left = expr;
                 mem_node->left = deref;
@@ -2566,7 +2671,10 @@ static ASTNode* parser_parse_var_declaration(Parser* parser) {
     parser_eat(parser, TOKEN_SEMICOLON);
     
     if (is_const && init_expr == NULL) {
-        printf("Error de sintaxis: la variable constante '%s' debe ser inicializada en la linea %d\n", var_name, line);
+        char msg[256];
+        snprintf(msg, sizeof(msg), "la variable constante '%s' debe ser inicializada", var_name ? var_name : "");
+        diag_error(parser->filename, parser->source_code, line, 1, var_name ? (int)strlen(var_name) : 1,
+                   msg, "asigna un valor inicial con '= <expresion>'");
         exit(1);
     }
     
@@ -2575,6 +2683,8 @@ static ASTNode* parser_parse_var_declaration(Parser* parser) {
             vtype = strdup("fundamental::string");
         } else if (init_expr && init_expr->type == AST_NULL) {
             vtype = strdup("void*");
+        } else if (init_expr && init_expr->type == AST_FLOAT_LITERAL) {
+            vtype = init_expr->is_float ? strdup("float") : strdup("double");
         } else {
             vtype = strdup("int");
         }
@@ -2605,6 +2715,12 @@ static ASTNode* parser_parse_var_declaration(Parser* parser) {
     vdecl->array_size = array_size;
     vdecl->is_const = is_const;
     vdecl->is_static = is_static;
+    if (vtype) {
+        if (strcmp(vtype, "float") == 0) vdecl->is_float = 1;
+        else if (strcmp(vtype, "double") == 0) vdecl->is_double = 1;
+        else if (strcmp(vtype, "int64") == 0 || strcmp(vtype, "uint64") == 0 || strcmp(vtype, "long long") == 0) vdecl->is_64bit = 1;
+        if (strncmp(vtype, "uint", 4) == 0 || strstr(vtype, "unsigned") != NULL) vdecl->is_unsigned = 1;
+    }
     if (is_const && init_expr && eval_const_expr(init_expr, &cval)) {
         vdecl->int_value = cval;
     }
@@ -3126,8 +3242,13 @@ static ASTNode* parser_parse_declaration(Parser* parser) {
         return vdecl;
     }
     
-    printf("Error de sintaxis: declaracion inesperada '%s' en la linea %d\n",
-           parser->current_token->value, parser->current_token->line);
+    char msg[256];
+    snprintf(msg, sizeof(msg), "declaracion inesperada '%s'", parser->current_token->value ? parser->current_token->value : "");
+    diag_error(parser->filename, parser->source_code, parser->current_token->line,
+               parser->current_token->column > 0 ? parser->current_token->column : 1,
+               parser->current_token->value ? (int)strlen(parser->current_token->value) : 1,
+               msg,
+               "las sentencias deben estar dentro de una funcion o ser declaraciones de variables, funciones o estructuras");
     exit(1);
 }
 

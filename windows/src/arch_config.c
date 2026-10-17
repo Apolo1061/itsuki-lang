@@ -254,6 +254,18 @@ const ArchConfig* arch_get_current(void) {
     return &active_config;
 }
 
+void arch_set_target_bits(int bits) {
+    if (!is_initialized) arch_init();
+    if (bits == 32 || bits == 64) {
+        active_config.target_bits = bits;
+    }
+}
+
+int arch_get_target_bits(void) {
+    if (!is_initialized) arch_init();
+    return active_config.target_bits > 0 ? active_config.target_bits : ((active_config.gcc_bits == 64) ? 64 : 32);
+}
+
 void arch_print_diagnostics(void) {
     const ArchConfig* cfg = arch_get_current();
     printf("===========================================================\n");
@@ -263,14 +275,18 @@ void arch_print_diagnostics(void) {
     printf("  Arquitectura Host   : %s\n", cfg->host_arch);
     printf("  Compilador C / GCC  : %s\n", cfg->gcc_path);
     printf("  GCC Machine Target  : %s (%d bits)\n", cfg->gcc_arch, cfg->gcc_bits);
+    printf("  Arquitectura Target : %s (%d bits)\n", cfg->target_bits == 64 ? "x86_64" : "x86", cfg->target_bits == 64 ? 64 : 32);
     printf("  Flags de Enlace     : %s\n", cfg->gcc_flags[0] != '\0' ? cfg->gcc_flags : "(estandar)");
     printf("  Soporte Multilib    : %s\n", cfg->multilib_supported ? "Si [OK]" : "No detectado / Incompleto");
     printf("  Origen Configuracion: %s\n", cfg->is_loaded_from_file ? cfg->config_file_path : "Autodetectado en tiempo real");
-    printf("  Salida de Ejecutable: Binario nativo x86 (32 bits)\n");
+    printf("  Salida de Ejecutable: Binario nativo %s (%d bits)\n", cfg->target_bits == 64 ? "x86_64" : "x86", cfg->target_bits == 64 ? 64 : 32);
     printf("===========================================================\n");
-    if (cfg->os_bits == 64) {
-        printf("  [INFO] Ejecutables de 32 bits son compatibles nativamente\n");
-        printf("         en tu sistema de 64 bits mediante WOW64 / multilib.\n");
+    if (cfg->target_bits == 64) {
+        printf("  [INFO] Modo nativo x86_64 (64 bits) habilitado.\n");
+        printf("         Soporta int64, float, double y llamadas nativas de 64 bits.\n");
+    } else if (cfg->os_bits == 64) {
+        printf("  [INFO] Modo de compatibilidad x86 (32 bits) habilitado.\n");
+        printf("         Ejecutables compatibles nativamente via WOW64 / multilib.\n");
     }
     printf("===========================================================\n\n");
 }

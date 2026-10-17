@@ -2,9 +2,27 @@
 #        ITSUKI COMPILER - INSTALADOR (POWERSHELL)
 # ===========================================================
 [CmdletBinding()]
-param()
+param(
+    [switch]$Uninstall
+)
 
 $ErrorActionPreference = "Stop"
+
+if ($Uninstall) {
+    Write-Host "`n =======================================================" -ForegroundColor Yellow
+    Write-Host "         ITSUKI COMPILER - DESINSTALADOR (POWERSHELL)   " -ForegroundColor Yellow
+    Write-Host " =======================================================`n" -ForegroundColor Yellow
+    $installDir = Join-Path $env:USERPROFILE ".itsuki"
+    $binDir = Join-Path $installDir "bin"
+    $cur = [Environment]::GetEnvironmentVariable("Path", "User")
+    if ($cur) {
+        $parts = $cur.Split(";") | Where-Object { $_ -ne $binDir -and $_ -ne "" }
+        [Environment]::SetEnvironmentVariable("Path", ($parts -join ";"), "User")
+    }
+    Remove-Item -Recurse -Force $installDir -ErrorAction SilentlyContinue
+    Write-Host " [OK] Itsuki ha sido desinstalado exitosamente de tu sistema.`n" -ForegroundColor Green
+    exit 0
+}
 
 Write-Host ""
 Write-Host " =======================================================" -ForegroundColor Cyan
@@ -169,5 +187,7 @@ Write-Host "  Comandos para comenzar:" -ForegroundColor White
 Write-Host "    itsuki run programa.suki   Compilar y ejecutar" -ForegroundColor Cyan
 Write-Host "    itsuki doctor             Ver estado del entorno" -ForegroundColor Cyan
 Write-Host "    itsuki --help             Ver todas las opciones" -ForegroundColor Cyan
+Write-Host "  Para desinstalar:" -ForegroundColor White
+Write-Host "    .\install.ps1 -Uninstall   o   ~/.itsuki/uninstall.ps1" -ForegroundColor Yellow
 Write-Host " =======================================================" -ForegroundColor Green
 Write-Host ""

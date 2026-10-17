@@ -8,30 +8,33 @@
   <a href="https://discord.gg/K6SEpB7Pf5">
     <img src="https://img.shields.io/badge/Discord-Unirse%20a%20la%20Comunidad-7289DA?logo=discord&logoColor=white" alt="Discord">
   </a>
-  <img src="https://img.shields.io/badge/version-5.0.0-blue.svg" alt="Versión">
-  <img src="https://img.shields.io/badge/arquitectura-x86_32-brightgreen.svg" alt="Arquitectura">
+  <img src="https://img.shields.io/badge/version-5.5.0-blue.svg" alt="Versión">
+  <img src="https://img.shields.io/badge/arquitectura-x86_32%20%7C%20x86_64-brightgreen.svg" alt="Arquitectura">
   <img src="https://img.shields.io/badge/plataforma-Windows%20%7C%20Linux-orange.svg" alt="Plataforma">
   <img src="https://img.shields.io/badge/licencia-MIT-green.svg" alt="Licencia">
 </p>
 
-**Itsuki** es un lenguaje de programacion compilado y de alto rendimiento que genera codigo ensamblador nativo x86. Diseñado para ofrecer control de bajo nivel con gran claridad incluye un runtime nativo autocontenido, un preprocesador C completo, interoperabilidad directa con C, c++ y un **gestor de paquetes integrado** basado en GitHub.
+**Itsuki** es un lenguaje de programación compilado y de alto rendimiento que genera código ensamblador nativo **x86_64** y **x86_32**. Diseñado para ofrecer control de bajo nivel con gran claridad, incluye soporte para números de punto flotante (`float`, `double`) mediante SSE2, diagnósticos de error modernos estilo Rust/Clang, un optimizador por mirilla (peephole optimizer), runtime nativo autocontenido, preprocesador C completo, interoperabilidad directa con C/C++ y un **gestor de paquetes integrado** basado en GitHub.
 
 ---
 
 ## Características Principales
 
-*  **Generación de Codigo Nativo**: Compila directamente a ensamblador x86 de 32 bits de alto rendimiento.
-*  **Detección Inteligente de Arquitectura**: Antes de instalarse, detecta si la PC es de **64 bits** (x86_64/AMD64) o **32 bits** (x86), verifica el compilador GCC (`-dumpmachine`, soporte multilib) y configura automáticamente los flags idóneos en `arch.conf`.
-*  **Comando de Diagnóstico (`itsuki doctor`)**: Analiza la arquitectura del sistema operativo, el toolchain GCC y el estado multilib en cualquier momento.
-*  **Gestor de Paquetes Integrado**: Instala y actualiza librerías directamente desde GitHub con `itsuki install <url|usuario/repo>`.
-*  **Sistema de Inclusión Diferenciado**:
+*  ⚡ **Generación Nativa Dual (x86_64 y x86_32)**: Genera ensamblador nativo puro tanto para arquitecturas de **64 bits** (`-m64`, registros `%rax`, `%rbp`, `%rsp`, convenciones de llamada System V AMD64 y Microsoft x64) como de **32 bits** (`-m32`).
+*  🎯 **Soporte para Números de Punto Flotante (`float`, `double`)**: Tipos flotantes de 32 bits (`float`) y 64 bits (`double`) procesados mediante hardware con instrucciones **SSE2** escalares (`movss`, `movsd`, `addss`, `subss`, `mulss`, `divss`, `ucomiss`, `ucomisd`), conversiones enteras y formateo directo en `print`/`println`.
+*  🎨 **Diagnósticos de Error Estilo Moderno (Rust / Clang)**: Mensajes estilizados en terminal con colores ANSI, visualización del archivo de origen, margen vertical `|`, marcador de columna exacta `^~~~` y sugerencias contextuales estructuradas (`= ayuda: ...`).
+*  🚀 **Optimizador de Ensamblador por Mirilla (Peephole Optimizer)**: Motor de optimización en múltiples pasadas que elimina instrucciones redundantes (`movl`/`movq`), simplifica operaciones aritméticas neutras (`add $0`, `imul $1`, `xor`), compacta saltos incondicionales y emite el conteo de mejoras aplicadas.
+*  🔍 **Detección Inteligente de Arquitectura**: Antes de instalarse, detecta si la PC es de **64 bits** (x86_64/AMD64) o **32 bits** (x86), verifica el compilador GCC (`-dumpmachine`, soporte multilib) y configura automáticamente los flags idóneos en `arch.conf`.
+*  🩺 **Comando de Diagnóstico (`itsuki doctor`)**: Analiza la arquitectura del sistema operativo, el toolchain GCC y el estado multilib en cualquier momento.
+*  📦 **Gestor de Paquetes Integrado**: Instala y actualiza librerías directamente desde GitHub con `itsuki install <url|usuario/repo>`.
+*  📂 **Sistema de Inclusión Diferenciado**:
   * `<libreria.huki>`: Búsqueda estricta en el sistema (`~/.itsuki/packages/`) y librerías integradas.
   * `"archivo.huki"`: Búsqueda local en el proyecto o ruta exacta especificada.
   * *Descubrimiento automático*: Al incluir una cabecera `.huki`, su implementación compañera `.suki` se compila y enlaza automáticamente.
-*  **Interoperabilidad Nativa con C**: Llama a funciones de C, enlaza archivos `.c` directamente y utiliza encabezados C en tu proyecto sin wrappers complejos.
-*  **Programación Estructurada y Orientada a Objetos**: Soporta funciones, punteros, arreglos, structs anidados, clases con herencia, constructores y métodos.
-*  **Preprocesador Potente**: Compatible con `#include`, `#import`, `#pragma once`, `#define` (con macros funcionales y variádicas) y directivas condicionales (`#if`, `#ifdef`, `#elif`, `#else`, `#endif`).
-*  **Ensamblador en Línea**: Bloques `__asm__("...")` para optimizaciones críticas de hardware.
+*  🔗 **Interoperabilidad Nativa con C**: Llama a funciones de C, enlaza archivos `.c` directamente y utiliza encabezados C en tu proyecto sin wrappers complejos.
+*  🏛️ **Programación Estructurada y Orientada a Objetos**: Soporta funciones, punteros, arreglos, structs anidados, clases con herencia, constructores y métodos.
+*  ⚙️ **Preprocesador Potente**: Compatible con `#include`, `#import`, `#pragma once`, `#define` (con macros funcionales y variádicas) y directivas condicionales (`#if`, `#ifdef`, `#elif`, `#else`, `#endif`).
+*  💻 **Ensamblador en Línea**: Bloques `__asm__("...")` para optimizaciones críticas de hardware.
 
 ---
 
@@ -52,7 +55,7 @@ Accede a la carpeta `windows` y ejecuta el instalador que prefieras:
    powershell -ExecutionPolicy Bypass -File install.ps1
    ```
 
-*Itsuki se instalará en `%USERPROFILE%\.itsuki\bin` y se agregará permanentemente a tu `PATH`.*
+*Itsuki se instalará en `%USERPROFILE%\.itsuki\bin` y se agregará permanentemente a tu `PATH`. Para desinstalar: `install.bat --uninstall` o ejecuta `%USERPROFILE%\.itsuki\uninstall.bat`.*
 
 ### En Linux
 Accede a la carpeta `linux` y ejecuta:
@@ -62,6 +65,9 @@ cd linux
 bash install.sh
 ```
 *(No requiere permisos de superusuario ni `sudo`; se instala 100% en tu espacio de usuario `~/.itsuki/` y añade la ruta a tu `PATH`).*
+
+> **Para desinstalar en Linux**:
+> Ejecuta `bash install.sh --uninstall` o simplemente `~/.itsuki/uninstall.sh`.
 
 ---
 
@@ -137,9 +143,29 @@ fn main() -> void {
 ### Variables y Tipos
 ```c
 var x: int = 10;
-var pi: int = 31416; // Valores en punto fijo o enteros
+var f: float = 3.14159;      // Punto flotante de 32 bits (SSE2)
+var d: double = 2.718281828; // Punto flotante de 64 bits (SSE2)
+var big: int64 = 9223372036854775807;
 var mensaje: char* = "Cadena de texto";
-var activo: int = 1;
+var activo: bool = true;
+```
+
+### Operaciones de Punto Flotante
+```c
+using namespace fundamental;
+
+fn calcular_area(radio: float) -> float {
+    var pi: float = 3.141592;
+    return pi * radio * radio;
+}
+
+fn main() -> int {
+    var radio: float = 5.5;
+    var area: float = calcular_area(radio);
+    println("Area del circulo:");
+    println(area); // Soporte nativo de impresion en println y print
+    return 0;
+}
 ```
 
 ### Funciones

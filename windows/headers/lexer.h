@@ -8,13 +8,14 @@ typedef struct {
     int current_pos;
     char current_char;
     int line;
+    int column;
 } Lexer;
 
 Lexer* init_lexer(char* source);
 void lexer_advance(Lexer* lexer);
 char lexer_peek(Lexer* lexer);
 void lexer_skip_whitespace(Lexer* lexer);
-Token* init_token(TokenType type, char* value, int line);
+Token* init_token(TokenType type, char* value, int line, int column);
 Token* lexer_get_next_token(Lexer* lexer);
 
 #endif // LEXER_H

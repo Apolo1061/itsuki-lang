@@ -13,6 +13,10 @@ set "SCRIPT_DIR=%~dp0"
 set "BIN_SRC="
 set "LIB_SRC="
 
+if /i "%~1"=="--uninstall" goto do_uninstall
+if /i "%~1"=="uninstall" goto do_uninstall
+if /i "%~1"=="-u" goto do_uninstall
+
 rem -----------------------------------------------------------
 rem [1/5] 20% Deteccion de arquitectura y toolchain
 rem -----------------------------------------------------------
@@ -177,6 +181,22 @@ echo   Comandos para comenzar:
 echo     itsuki run archivo.suki   Compilar y ejecutar
 echo     itsuki doctor             Ver estado del entorno
 echo     itsuki --help             Ver todas las opciones
+echo   Para desinstalar:
+echo     install.bat --uninstall   o   %USERPROFILE%\.itsuki\uninstall.bat
 echo  =======================================================
 echo.
 pause
+exit /b 0
+
+:do_uninstall
+echo.
+echo  =======================================================
+echo         ITSUKI COMPILER - DESINSTALADOR (WINDOWS)
+echo  =======================================================
+echo.
+echo  Desinstalando Itsuki de %USERPROFILE%\.itsuki...
+powershell -NoProfile -Command "$bin = [System.IO.Path]::GetFullPath('%USERPROFILE%\.itsuki\bin'); $cur = [Environment]::GetEnvironmentVariable('Path', 'User'); if ($cur -like ('*' + $bin + '*')) { $p = $cur.Split(';') | Where-Object { $_ -ne $bin -and $_ -ne '' }; [Environment]::SetEnvironmentVariable('Path', ($p -join ';'), 'User'); }"
+rmdir /s /q "%USERPROFILE%\.itsuki" 2>nul
+echo  [OK] Itsuki ha sido desinstalado exitosamente de tu sistema.
+echo.
+exit /b 0

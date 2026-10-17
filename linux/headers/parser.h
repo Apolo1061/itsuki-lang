@@ -9,9 +9,12 @@ typedef struct {
     Token* current_token;
     Token* peek_token;
     char* current_namespace;
+    const char* filename;
+    const char* source_code;
 } Parser;
 
 Parser* init_parser(Lexer* lexer);
+void parser_set_context(Parser* parser, const char* filename, const char* source_code);
 Token* parser_peek_token(Parser* parser);
 ASTNode* parser_parse(Parser* parser);
 

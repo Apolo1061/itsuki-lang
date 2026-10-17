@@ -1,13 +1,70 @@
+#ifndef __USE_MINGW_ANSI_STDIO
+#define __USE_MINGW_ANSI_STDIO 1
+#endif
 #include "generator.h"
 #include "parser.h"
+#include "diagnostics.h"
 #include <stdlib.h>
 #include <string.h>
 #include <stdio.h>
+
+static const char* generator_current_filename = NULL;
+static const char* generator_current_source = NULL;
+
+void generator_set_context(const char* filename, const char* source_code) {
+    generator_current_filename = filename;
+    generator_current_source = source_code;
+}
+
+typedef struct DeclaredFunc DeclaredFunc;
+static DeclaredFunc* find_declared_func(const char* target_func);
+
+static int target_bits = 32;
+static int peephole_opts_count = 0;
+
+void generator_set_target_bits(int bits) {
+    target_bits = (bits == 64) ? 64 : 32;
+}
+
+int generator_get_target_bits(void) {
+    return target_bits;
+}
+
+int generator_get_peephole_optimizations_count(void) {
+    return peephole_opts_count;
+}
 
 typedef struct {
     char* value;
     int id;
 } StringLiteral;
+
+typedef struct FloatLiteral {
+    double value;
+    int id;
+    int is_double; // 1 = double (8 bytes), 0 = float (4 bytes)
+} FloatLiteral;
+
+#define MAX_FLOAT_LITERALS 1024
+static FloatLiteral float_table[MAX_FLOAT_LITERALS];
+static int float_count = 0;
+
+static int get_or_add_float_literal(double val, int is_double) {
+    for (int i = 0; i < float_count; i++) {
+        if (float_table[i].is_double == is_double && float_table[i].value == val) {
+            return float_table[i].id;
+        }
+    }
+    if (float_count < MAX_FLOAT_LITERALS) {
+        int id = float_count;
+        float_table[id].value = val;
+        float_table[id].id = id;
+        float_table[id].is_double = is_double;
+        float_count++;
+        return id;
+    }
+    return 0;
+}
 
 typedef struct Symbol {
     char* name;
@@ -19,6 +76,10 @@ typedef struct Symbol {
     int array_size;
     int is_const;
     int is_static;
+    int is_float;
+    int is_double;
+    int is_64bit;
+    int is_unsigned;
     char* asm_name;
     struct Symbol* next;
 } Symbol;
@@ -30,6 +91,11 @@ typedef struct StaticLocalVar {
     int is_string;
     int is_array;
     int array_size;
+    int is_float;
+    int is_double;
+    int is_64bit;
+    int is_unsigned;
+    double double_val;
     struct StaticLocalVar* next;
 } StaticLocalVar;
 
@@ -50,6 +116,11 @@ typedef struct GlobalVar {
     int array_size;
     int int_val;
     char* string_val;
+    int is_float;
+    int is_double;
+    int is_64bit;
+    int is_unsigned;
+    double double_val;
     ASTNode* init_node;
     struct GlobalVar* next;
 } GlobalVar;
@@ -296,13 +367,23 @@ static void peephole_optimize_file(const char* filepath) {
             while (*t1 == ' ' || *t1 == '\t') t1++;
             if (*t1 == '\0') continue;
             
-            // 1. Instrucciones identidad que no hacen nada
+            // 1. Instrucciones identidad que no hacen nada (32-bit, 64-bit y SSE2)
             if (strcmp(t1, "movl %eax, %eax") == 0 ||
                 strcmp(t1, "movl %ebx, %ebx") == 0 ||
                 strcmp(t1, "movl %ecx, %ecx") == 0 ||
                 strcmp(t1, "movl %edx, %edx") == 0 ||
                 strcmp(t1, "movl %esi, %esi") == 0 ||
                 strcmp(t1, "movl %edi, %edi") == 0 ||
+                strcmp(t1, "movq %rax, %rax") == 0 ||
+                strcmp(t1, "movq %rbx, %rbx") == 0 ||
+                strcmp(t1, "movq %rcx, %rcx") == 0 ||
+                strcmp(t1, "movq %rdx, %rdx") == 0 ||
+                strcmp(t1, "movq %rsi, %rsi") == 0 ||
+                strcmp(t1, "movq %rdi, %rdi") == 0 ||
+                strcmp(t1, "movss %xmm0, %xmm0") == 0 ||
+                strcmp(t1, "movss %xmm1, %xmm1") == 0 ||
+                strcmp(t1, "movsd %xmm0, %xmm0") == 0 ||
+                strcmp(t1, "movsd %xmm1, %xmm1") == 0 ||
                 strcmp(t1, "addl $0, %eax") == 0 ||
                 strcmp(t1, "addl $0, %ebx") == 0 ||
                 strcmp(t1, "addl $0, %ecx") == 0 ||
@@ -312,49 +393,60 @@ static void peephole_optimize_file(const char* filepath) {
                 strcmp(t1, "subl $0, %ebx") == 0 ||
                 strcmp(t1, "subl $0, %ecx") == 0 ||
                 strcmp(t1, "subl $0, %edx") == 0 ||
-                strcmp(t1, "subl $0, %esp") == 0) {
+                strcmp(t1, "subl $0, %esp") == 0 ||
+                strcmp(t1, "addq $0, %rax") == 0 ||
+                strcmp(t1, "addq $0, %rsp") == 0 ||
+                strcmp(t1, "subq $0, %rax") == 0 ||
+                strcmp(t1, "subq $0, %rsp") == 0) {
                 free(lines[i]);
                 lines[i] = NULL;
                 changed = 1;
+                peephole_opts_count++;
                 continue;
             }
             
-            // 2. Optimización de tamaño de instrucción: movl $0, %reg -> xorl %reg, %reg (2 bytes vs 5 bytes)
+            // 2. Optimización de tamaño de instrucción: mov $0, %reg -> xor %reg, %reg
             if (strcmp(t1, "movl $0, %eax") == 0) {
                 free(lines[i]); lines[i] = strdup("    xorl %eax, %eax");
-                changed = 1; t1 = lines[i] + 4;
+                changed = 1; peephole_opts_count++; t1 = lines[i] + 4;
             } else if (strcmp(t1, "movl $0, %ebx") == 0) {
                 free(lines[i]); lines[i] = strdup("    xorl %ebx, %ebx");
-                changed = 1; t1 = lines[i] + 4;
+                changed = 1; peephole_opts_count++; t1 = lines[i] + 4;
             } else if (strcmp(t1, "movl $0, %ecx") == 0) {
                 free(lines[i]); lines[i] = strdup("    xorl %ecx, %ecx");
-                changed = 1; t1 = lines[i] + 4;
+                changed = 1; peephole_opts_count++; t1 = lines[i] + 4;
             } else if (strcmp(t1, "movl $0, %edx") == 0) {
                 free(lines[i]); lines[i] = strdup("    xorl %edx, %edx");
-                changed = 1; t1 = lines[i] + 4;
+                changed = 1; peephole_opts_count++; t1 = lines[i] + 4;
             } else if (strcmp(t1, "movl $0, %esi") == 0) {
                 free(lines[i]); lines[i] = strdup("    xorl %esi, %esi");
-                changed = 1; t1 = lines[i] + 4;
+                changed = 1; peephole_opts_count++; t1 = lines[i] + 4;
             } else if (strcmp(t1, "movl $0, %edi") == 0) {
                 free(lines[i]); lines[i] = strdup("    xorl %edi, %edi");
-                changed = 1; t1 = lines[i] + 4;
+                changed = 1; peephole_opts_count++; t1 = lines[i] + 4;
+            } else if (strcmp(t1, "movq $0, %rax") == 0) {
+                free(lines[i]); lines[i] = strdup("    xorq %rax, %rax");
+                changed = 1; peephole_opts_count++; t1 = lines[i] + 4;
             }
             
-            // 3. Incrementos y decrementos: addl $1 / subl $1 -> incl / decl (1 byte vs 3 bytes)
-            if (strcmp(t1, "addl $1, %eax") == 0) { free(lines[i]); lines[i] = strdup("    incl %eax"); changed = 1; t1 = lines[i] + 4; }
-            else if (strcmp(t1, "subl $1, %eax") == 0) { free(lines[i]); lines[i] = strdup("    decl %eax"); changed = 1; t1 = lines[i] + 4; }
-            else if (strcmp(t1, "addl $1, %edx") == 0) { free(lines[i]); lines[i] = strdup("    incl %edx"); changed = 1; t1 = lines[i] + 4; }
-            else if (strcmp(t1, "subl $1, %edx") == 0) { free(lines[i]); lines[i] = strdup("    decl %edx"); changed = 1; t1 = lines[i] + 4; }
-            else if (strcmp(t1, "addl $1, %ecx") == 0) { free(lines[i]); lines[i] = strdup("    incl %ecx"); changed = 1; t1 = lines[i] + 4; }
-            else if (strcmp(t1, "subl $1, %ecx") == 0) { free(lines[i]); lines[i] = strdup("    decl %ecx"); changed = 1; t1 = lines[i] + 4; }
-            else if (strcmp(t1, "addl $1, %ebx") == 0) { free(lines[i]); lines[i] = strdup("    incl %ebx"); changed = 1; t1 = lines[i] + 4; }
-            else if (strcmp(t1, "subl $1, %ebx") == 0) { free(lines[i]); lines[i] = strdup("    decl %ebx"); changed = 1; t1 = lines[i] + 4; }
+            // 3. Incrementos y decrementos: add $1 / sub $1 -> inc / dec
+            if (strcmp(t1, "addl $1, %eax") == 0) { free(lines[i]); lines[i] = strdup("    incl %eax"); changed = 1; peephole_opts_count++; t1 = lines[i] + 4; }
+            else if (strcmp(t1, "subl $1, %eax") == 0) { free(lines[i]); lines[i] = strdup("    decl %eax"); changed = 1; peephole_opts_count++; t1 = lines[i] + 4; }
+            else if (strcmp(t1, "addl $1, %edx") == 0) { free(lines[i]); lines[i] = strdup("    incl %edx"); changed = 1; peephole_opts_count++; t1 = lines[i] + 4; }
+            else if (strcmp(t1, "subl $1, %edx") == 0) { free(lines[i]); lines[i] = strdup("    decl %edx"); changed = 1; peephole_opts_count++; t1 = lines[i] + 4; }
+            else if (strcmp(t1, "addl $1, %ecx") == 0) { free(lines[i]); lines[i] = strdup("    incl %ecx"); changed = 1; peephole_opts_count++; t1 = lines[i] + 4; }
+            else if (strcmp(t1, "subl $1, %ecx") == 0) { free(lines[i]); lines[i] = strdup("    decl %ecx"); changed = 1; peephole_opts_count++; t1 = lines[i] + 4; }
+            else if (strcmp(t1, "addl $1, %ebx") == 0) { free(lines[i]); lines[i] = strdup("    incl %ebx"); changed = 1; peephole_opts_count++; t1 = lines[i] + 4; }
+            else if (strcmp(t1, "subl $1, %ebx") == 0) { free(lines[i]); lines[i] = strdup("    decl %ebx"); changed = 1; peephole_opts_count++; t1 = lines[i] + 4; }
+            else if (strcmp(t1, "addq $1, %rax") == 0) { free(lines[i]); lines[i] = strdup("    incq %rax"); changed = 1; peephole_opts_count++; t1 = lines[i] + 4; }
+            else if (strcmp(t1, "subq $1, %rax") == 0) { free(lines[i]); lines[i] = strdup("    decq %rax"); changed = 1; peephole_opts_count++; t1 = lines[i] + 4; }
             
-            // 4. Comparación con cero: cmpl $0, %reg -> testl %reg, %reg (2 bytes vs 3 bytes)
-            if (strcmp(t1, "cmpl $0, %eax") == 0) { free(lines[i]); lines[i] = strdup("    testl %eax, %eax"); changed = 1; t1 = lines[i] + 4; }
-            else if (strcmp(t1, "cmpl $0, %edx") == 0) { free(lines[i]); lines[i] = strdup("    testl %edx, %edx"); changed = 1; t1 = lines[i] + 4; }
-            else if (strcmp(t1, "cmpl $0, %ecx") == 0) { free(lines[i]); lines[i] = strdup("    testl %ecx, %ecx"); changed = 1; t1 = lines[i] + 4; }
-            else if (strcmp(t1, "cmpl $0, %ebx") == 0) { free(lines[i]); lines[i] = strdup("    testl %ebx, %ebx"); changed = 1; t1 = lines[i] + 4; }
+            // 4. Comparación con cero: cmp $0, %reg -> test %reg, %reg
+            if (strcmp(t1, "cmpl $0, %eax") == 0) { free(lines[i]); lines[i] = strdup("    testl %eax, %eax"); changed = 1; peephole_opts_count++; t1 = lines[i] + 4; }
+            else if (strcmp(t1, "cmpl $0, %edx") == 0) { free(lines[i]); lines[i] = strdup("    testl %edx, %edx"); changed = 1; peephole_opts_count++; t1 = lines[i] + 4; }
+            else if (strcmp(t1, "cmpl $0, %ecx") == 0) { free(lines[i]); lines[i] = strdup("    testl %ecx, %ecx"); changed = 1; peephole_opts_count++; t1 = lines[i] + 4; }
+            else if (strcmp(t1, "cmpl $0, %ebx") == 0) { free(lines[i]); lines[i] = strdup("    testl %ebx, %ebx"); changed = 1; peephole_opts_count++; t1 = lines[i] + 4; }
+            else if (strcmp(t1, "cmpq $0, %rax") == 0) { free(lines[i]); lines[i] = strdup("    testq %rax, %rax"); changed = 1; peephole_opts_count++; t1 = lines[i] + 4; }
 
             // 5. Eliminar código inalcanzable tras ret o jmp incondicional
             if (strcmp(t1, "ret") == 0 || (strncmp(t1, "jmp .L", 6) == 0 && t1[strlen(t1) - 1] != ':')) {
@@ -363,10 +455,11 @@ static void peephole_optimize_file(const char* filepath) {
                     char* tk = lines[k];
                     while (*tk == ' ' || *tk == '\t') tk++;
                     if (*tk == '\0') continue;
-                    if (strchr(tk, ':') != NULL || *tk == '.') break; // Llegamos a una etiqueta o directiva
+                    if (strchr(tk, ':') != NULL || *tk == '.') break;
                     free(lines[k]);
                     lines[k] = NULL;
                     changed = 1;
+                    peephole_opts_count++;
                 }
             }
             
@@ -387,7 +480,7 @@ static void peephole_optimize_file(const char* filepath) {
             char* t2 = lines[next_idx];
             while (*t2 == ' ' || *t2 == '\t') t2++;
 
-            // 6. Fusión de ajustes a %esp: addl $X, %esp + addl $Y, %esp -> addl $(X+Y), %esp
+            // 6. Fusión de ajustes a %esp / %rsp
             if (strncmp(t1, "addl $", 6) == 0 && strstr(t1, ", %esp") != NULL &&
                 strncmp(t2, "addl $", 6) == 0 && strstr(t2, ", %esp") != NULL) {
                 int v1 = atoi(t1 + 6);
@@ -400,47 +493,76 @@ static void peephole_optimize_file(const char* filepath) {
                     free(lines[next_idx]);
                     lines[next_idx] = NULL;
                     changed = 1;
+                    peephole_opts_count++;
+                    continue;
+                }
+            }
+            if (strncmp(t1, "addq $", 6) == 0 && strstr(t1, ", %rsp") != NULL &&
+                strncmp(t2, "addq $", 6) == 0 && strstr(t2, ", %rsp") != NULL) {
+                int v1 = atoi(t1 + 6);
+                int v2 = atoi(t2 + 6);
+                if (v1 > 0 && v2 > 0) {
+                    char new_rsp[64];
+                    snprintf(new_rsp, sizeof(new_rsp), "    addq $%d, %%rsp", v1 + v2);
+                    free(lines[i]);
+                    lines[i] = strdup(new_rsp);
+                    free(lines[next_idx]);
+                    lines[next_idx] = NULL;
+                    changed = 1;
+                    peephole_opts_count++;
                     continue;
                 }
             }
 
-            // 7. push %reg seguido de pop %reg -> ninguno
+            // 7. push %reg seguido de pop %reg -> ninguno (32 y 64 bits)
             if ((strcmp(t1, "pushl %eax") == 0 && strcmp(t2, "popl %eax") == 0) ||
                 (strcmp(t1, "pushl %ebx") == 0 && strcmp(t2, "popl %ebx") == 0) ||
                 (strcmp(t1, "pushl %ecx") == 0 && strcmp(t2, "popl %ecx") == 0) ||
                 (strcmp(t1, "pushl %edx") == 0 && strcmp(t2, "popl %edx") == 0) ||
                 (strcmp(t1, "pushl %esi") == 0 && strcmp(t2, "popl %esi") == 0) ||
-                (strcmp(t1, "pushl %edi") == 0 && strcmp(t2, "popl %edi") == 0)) {
+                (strcmp(t1, "pushl %edi") == 0 && strcmp(t2, "popl %edi") == 0) ||
+                (strcmp(t1, "pushq %rax") == 0 && strcmp(t2, "popq %rax") == 0) ||
+                (strcmp(t1, "pushq %rbx") == 0 && strcmp(t2, "popq %rbx") == 0) ||
+                (strcmp(t1, "pushq %rcx") == 0 && strcmp(t2, "popq %rcx") == 0) ||
+                (strcmp(t1, "pushq %rdx") == 0 && strcmp(t2, "popq %rdx") == 0) ||
+                (strcmp(t1, "pushq %rsi") == 0 && strcmp(t2, "popq %rsi") == 0) ||
+                (strcmp(t1, "pushq %rdi") == 0 && strcmp(t2, "popq %rdi") == 0)) {
                 free(lines[i]);
                 lines[i] = NULL;
                 free(lines[next_idx]);
                 lines[next_idx] = NULL;
                 changed = 1;
+                peephole_opts_count++;
                 continue;
             }
 
-            // 8. test redundante tras xorl %reg, %reg
+            // 8. test redundante tras xor
             if ((strcmp(t1, "xorl %eax, %eax") == 0 && strcmp(t2, "testl %eax, %eax") == 0) ||
                 (strcmp(t1, "xorl %edx, %edx") == 0 && strcmp(t2, "testl %edx, %edx") == 0) ||
                 (strcmp(t1, "xorl %ecx, %ecx") == 0 && strcmp(t2, "testl %ecx, %ecx") == 0) ||
-                (strcmp(t1, "xorl %ebx, %ebx") == 0 && strcmp(t2, "testl %ebx, %ebx") == 0)) {
+                (strcmp(t1, "xorl %ebx, %ebx") == 0 && strcmp(t2, "testl %ebx, %ebx") == 0) ||
+                (strcmp(t1, "xorq %rax, %rax") == 0 && strcmp(t2, "testq %rax, %rax") == 0)) {
                 free(lines[next_idx]);
                 lines[next_idx] = NULL;
                 changed = 1;
+                peephole_opts_count++;
                 continue;
             }
             
             // 9. Store seguido de Load redundante a la misma ubicación
-            if (strncmp(t1, "movl %eax, ", 11) == 0 && strncmp(t2, "movl ", 5) == 0) {
+            if ((strncmp(t1, "movl %eax, ", 11) == 0 && strncmp(t2, "movl ", 5) == 0) ||
+                (strncmp(t1, "movq %rax, ", 11) == 0 && strncmp(t2, "movq ", 5) == 0)) {
+                int is_q = (t1[3] == 'q');
                 const char* loc1 = t1 + 11;
                 const char* rest2 = t2 + 5;
-                const char* comma2 = strstr(rest2, ", %eax");
+                const char* comma2 = strstr(rest2, is_q ? ", %rax" : ", %eax");
                 if (comma2 != NULL && comma2[6] == '\0') {
                     size_t loc2_len = (size_t)(comma2 - rest2);
                     if (strlen(loc1) == loc2_len && strncmp(loc1, rest2, loc2_len) == 0) {
                         free(lines[next_idx]);
                         lines[next_idx] = NULL;
                         changed = 1;
+                        peephole_opts_count++;
                         continue;
                     }
                 }
@@ -449,10 +571,13 @@ static void peephole_optimize_file(const char* filepath) {
             // 10. Movimientos de rebote (ping-pong)
             if ((strcmp(t1, "movl %eax, %edx") == 0 && strcmp(t2, "movl %edx, %eax") == 0) ||
                 (strcmp(t1, "movl %eax, %ecx") == 0 && strcmp(t2, "movl %ecx, %eax") == 0) ||
-                (strcmp(t1, "movl %eax, %ebx") == 0 && strcmp(t2, "movl %ebx, %eax") == 0)) {
+                (strcmp(t1, "movl %eax, %ebx") == 0 && strcmp(t2, "movl %ebx, %eax") == 0) ||
+                (strcmp(t1, "movq %rax, %rdx") == 0 && strcmp(t2, "movq %rdx, %rax") == 0) ||
+                (strcmp(t1, "movq %rax, %rcx") == 0 && strcmp(t2, "movq %rcx, %rax") == 0)) {
                 free(lines[next_idx]);
                 lines[next_idx] = NULL;
                 changed = 1;
+                peephole_opts_count++;
                 continue;
             }
 
@@ -464,6 +589,7 @@ static void peephole_optimize_file(const char* filepath) {
                     free(lines[i]);
                     lines[i] = NULL;
                     changed = 1;
+                    peephole_opts_count++;
                     continue;
                 }
             }
@@ -791,6 +917,28 @@ static void collect_strings(ASTNode* node) {
     collect_strings(node->right);
 }
 
+static void collect_floats(ASTNode* node) {
+    if (node == NULL) return;
+    if (node->type == AST_FLOAT_LITERAL) {
+        get_or_add_float_literal(node->double_value, node->is_double);
+    }
+    collect_floats(node->next);
+    collect_floats(node->children);
+    collect_floats(node->fields);
+    collect_floats(node->params);
+    collect_floats(node->body);
+    collect_floats(node->else_branch);
+    collect_floats(node->statements);
+    collect_floats(node->init_value);
+    collect_floats(node->update_expr);
+    collect_floats(node->return_value);
+    collect_floats(node->expr);
+    collect_floats(node->callee);
+    collect_floats(node->args);
+    collect_floats(node->left);
+    collect_floats(node->right);
+}
+
 static DeclaredFunc* find_exact_declared_function(const char* name, const char* ns) {
     DeclaredFunc* curr = declared_functions;
     while (curr != NULL) {
@@ -848,6 +996,11 @@ static void register_global_var_node(ASTNode* node) {
     gv->is_array = node->is_array;
     gv->array_size = node->array_size;
     gv->is_string = (node->type_name && strstr(node->type_name, "string") != NULL && strchr(node->type_name, '*') == NULL) ? 1 : 0;
+    gv->is_float = (node->type_name && strcmp(node->type_name, "float") == 0) ? 1 : 0;
+    gv->is_double = (node->type_name && strcmp(node->type_name, "double") == 0) ? 1 : 0;
+    gv->is_64bit = (node->type_name && (strcmp(node->type_name, "int64") == 0 || strcmp(node->type_name, "uint64") == 0 || strcmp(node->type_name, "long long") == 0 || (target_bits == 64 && strstr(node->type_name, "*") != NULL))) ? 1 : 0;
+    gv->is_unsigned = (node->type_name && (strncmp(node->type_name, "uint", 4) == 0 || strstr(node->type_name, "unsigned") != NULL)) ? 1 : 0;
+    gv->double_val = 0.0;
     gv->init_node = node->init_value;
     gv->int_val = 0;
     gv->string_val = NULL;
@@ -885,6 +1038,9 @@ static void register_global_var_node(ASTNode* node) {
             gv->int_val = node->init_value->int_value;
         } else if (node->init_value->type == AST_NULL) {
             gv->int_val = 0;
+        }
+        if (node->init_value->type == AST_FLOAT_LITERAL) {
+            gv->double_val = node->init_value->double_value;
         }
         if (node->init_value->type == AST_STRING && node->init_value->string_value != NULL) {
             gv->string_val = strdup(node->init_value->string_value);
@@ -978,6 +1134,10 @@ static void add_symbol(const char* name, int offset, int is_param, const char* t
     sym->array_size = array_size;
     sym->is_const = is_const;
     sym->is_static = 0;
+    sym->is_float = (type_name && strcmp(type_name, "float") == 0) ? 1 : 0;
+    sym->is_double = (type_name && strcmp(type_name, "double") == 0) ? 1 : 0;
+    sym->is_64bit = (type_name && (strcmp(type_name, "int64") == 0 || strcmp(type_name, "uint64") == 0 || strcmp(type_name, "long long") == 0 || (target_bits == 64 && strstr(type_name, "*") != NULL))) ? 1 : 0;
+    sym->is_unsigned = (type_name && (strncmp(type_name, "uint", 4) == 0 || strstr(type_name, "unsigned") != NULL)) ? 1 : 0;
     sym->asm_name = NULL;
     sym->next = current_symbols;
     current_symbols = sym;
@@ -994,10 +1154,19 @@ static void add_static_symbol(const char* name, const char* asm_name, const char
     sym->array_size = array_size;
     sym->is_const = is_const;
     sym->is_static = 1;
+    sym->is_float = (type_name && strcmp(type_name, "float") == 0) ? 1 : 0;
+    sym->is_double = (type_name && strcmp(type_name, "double") == 0) ? 1 : 0;
+    sym->is_64bit = (type_name && (strcmp(type_name, "int64") == 0 || strcmp(type_name, "uint64") == 0 || strcmp(type_name, "long long") == 0 || (target_bits == 64 && strstr(type_name, "*") != NULL))) ? 1 : 0;
+    sym->is_unsigned = (type_name && (strncmp(type_name, "uint", 4) == 0 || strstr(type_name, "unsigned") != NULL)) ? 1 : 0;
     sym->asm_name = strdup(asm_name);
     sym->next = current_symbols;
     current_symbols = sym;
 }
+
+static int is_float_expr(ASTNode* node);
+static int is_double_expr(ASTNode* node);
+static int is_any_float_expr(ASTNode* node);
+static int is_64bit_expr(ASTNode* node);
 
 static Symbol* find_symbol(const char* name) {
     Symbol* curr = current_symbols;
@@ -1021,6 +1190,62 @@ static void free_symbols() {
         curr = next;
     }
     current_symbols = NULL;
+}
+
+static int is_float_expr(ASTNode* node) {
+    if (!node) return 0;
+    if (node->type == AST_FLOAT_LITERAL) return node->is_float;
+    if (node->type == AST_IDENTIFIER || node->type == AST_SCOPED_IDENTIFIER) {
+        Symbol* s = find_symbol(node->name);
+        if (s && s->is_float) return 1;
+        GlobalVar* g = find_global_var(node->name);
+        if (g && g->is_float) return 1;
+        return 0;
+    }
+    if (node->type == AST_CALL_EXPR && node->callee && node->callee->name) {
+        DeclaredFunc* df = find_declared_func(node->callee->name);
+        if (df && df->node && df->node->type_name && strcmp(df->node->type_name, "float") == 0) return 1;
+    }
+    if (node->type == AST_BINARY_EXPR) {
+        return (is_float_expr(node->left) || is_float_expr(node->right)) && !is_double_expr(node);
+    }
+    return 0;
+}
+
+static int is_double_expr(ASTNode* node) {
+    if (!node) return 0;
+    if (node->type == AST_FLOAT_LITERAL) return node->is_double;
+    if (node->type == AST_IDENTIFIER || node->type == AST_SCOPED_IDENTIFIER) {
+        Symbol* s = find_symbol(node->name);
+        if (s && s->is_double) return 1;
+        GlobalVar* g = find_global_var(node->name);
+        if (g && g->is_double) return 1;
+        return 0;
+    }
+    if (node->type == AST_CALL_EXPR && node->callee && node->callee->name) {
+        DeclaredFunc* df = find_declared_func(node->callee->name);
+        if (df && df->node && df->node->type_name && strcmp(df->node->type_name, "double") == 0) return 1;
+    }
+    if (node->type == AST_BINARY_EXPR) {
+        return (is_double_expr(node->left) || is_double_expr(node->right));
+    }
+    return 0;
+}
+
+static int is_any_float_expr(ASTNode* node) {
+    return is_float_expr(node) || is_double_expr(node);
+}
+
+static int __attribute__((unused)) is_64bit_expr(ASTNode* node) {
+    if (!node) return 0;
+    if (node->is_64bit) return 1;
+    if (node->type == AST_IDENTIFIER || node->type == AST_SCOPED_IDENTIFIER) {
+        Symbol* s = find_symbol(node->name);
+        if (s && s->is_64bit) return 1;
+        GlobalVar* g = find_global_var(node->name);
+        if (g && g->is_64bit) return 1;
+    }
+    return 0;
 }
 
 static void print_assembly_string(FILE* out, const char* str) {
@@ -1235,6 +1460,69 @@ static int get_identifier_memory_ref(ASTNode* node, char* out_ref) {
 }
 
 static void push_arg_efficiently(ASTNode* arg, FILE* out) {
+    if (target_bits == 64) {
+        if (arg->type == AST_NUMBER) {
+            fprintf(out, "    pushq $%lld\n", (long long)arg->int_value);
+        } else if (arg->type == AST_NULL) {
+            fprintf(out, "    pushq $0\n");
+        } else if (arg->type == AST_THIS) {
+            Symbol* this_sym = find_symbol("this");
+            int this_off = this_sym ? this_sym->stack_offset : 16;
+            fprintf(out, "    pushq %d(%%rbp)\n", this_off);
+        } else if (arg->type == AST_STRING) {
+            fprintf(out, "    leaq .LC%d(%%rip), %%rax\n", arg->int_value);
+            fprintf(out, "    pushq %%rax\n");
+        } else if (arg->type == AST_IDENTIFIER) {
+            Symbol* sym = find_symbol(arg->name);
+            if (sym != NULL) {
+                if (sym->is_static && sym->asm_name != NULL) {
+                    if (sym->is_string || sym->is_array) {
+                        fprintf(out, "    leaq %s(%%rip), %%rax\n", sym->asm_name);
+                        fprintf(out, "    pushq %%rax\n");
+                    } else {
+                        fprintf(out, "    pushq %s(%%rip)\n", sym->asm_name);
+                    }
+                } else if (!(sym->is_string && !sym->is_param) && !sym->is_array) {
+                    fprintf(out, "    pushq %d(%%rbp)\n", sym->stack_offset);
+                } else {
+                    generate_expression(arg, out);
+                    fprintf(out, "    pushq %%rax\n");
+                }
+            } else {
+                GlobalVar* gv = find_global_var(arg->name);
+                if (gv != NULL) {
+                    if (gv->is_string || gv->is_array) {
+                        fprintf(out, "    leaq %s(%%rip), %%rax\n", gv->asm_name);
+                        fprintf(out, "    pushq %%rax\n");
+                    } else if (gv->is_const && gv->string_val == NULL && (gv->init_node == NULL || gv->init_node->type == AST_NUMBER)) {
+                        fprintf(out, "    pushq $%lld\n", (long long)gv->int_val);
+                    } else {
+                        fprintf(out, "    pushq %s(%%rip)\n", gv->asm_name);
+                    }
+                } else {
+                    int eval = 0;
+                    if (find_constant(arg->name, &eval)) {
+                        fprintf(out, "    pushq $%lld\n", (long long)eval);
+                    } else {
+                        generate_expression(arg, out);
+                        fprintf(out, "    pushq %%rax\n");
+                    }
+                }
+            }
+        } else if (arg->type == AST_MEMBER_EXPR) {
+            MemberResolution res;
+            if (resolve_member_access(arg, &res, NULL, 0) && !res.is_pointer && !res.is_string) {
+                fprintf(out, "    pushq %d(%%rbp)\n", res.stack_offset);
+            } else {
+                generate_expression(arg, out);
+                fprintf(out, "    pushq %%rax\n");
+            }
+        } else {
+            generate_expression(arg, out);
+            fprintf(out, "    pushq %%rax\n");
+        }
+        return;
+    }
     if (arg->type == AST_NUMBER) {
         fprintf(out, "    pushl $%d\n", arg->int_value);
     } else if (arg->type == AST_NULL) {
@@ -1380,18 +1668,28 @@ static DeclaredFunc* find_declared_func(const char* target_func) {
 }
 
 static int get_param_or_var_size(ASTNode* node) {
-    if (node == NULL) return 4;
+    if (node == NULL) return (target_bits == 64) ? 8 : 4;
     StructDef* sd = find_struct_def(node->type_name);
-    int var_size = 4;
+    int elem_sz = 4;
+    if (node->type_name) {
+        if (strcmp(node->type_name, "double") == 0 ||
+            strcmp(node->type_name, "int64") == 0 ||
+            strcmp(node->type_name, "uint64") == 0 ||
+            strcmp(node->type_name, "long long") == 0 ||
+            (target_bits == 64 && strstr(node->type_name, "*") != NULL)) {
+            elem_sz = 8;
+        }
+    }
+    int var_size = elem_sz;
     int is_arr = node->is_array;
     int arr_sz = node->array_size;
     if (is_arr && arr_sz > 0) {
-        var_size = arr_sz * 4;
+        var_size = arr_sz * elem_sz;
     } else if (sd != NULL) {
         var_size = sd->total_size;
     } else if (node->type_name && strstr(node->type_name, "string") != NULL && strchr(node->type_name, '*') == NULL) {
         if (node->type == AST_PARAM) {
-            var_size = 4;
+            var_size = (target_bits == 64) ? 8 : 4;
         } else {
             var_size = 256;
         }
@@ -1563,6 +1861,95 @@ static void add_inlined_local_symbols(ASTNode* node, int* slot_offset) {
     }
 }
 
+static void validate_function_call_args(const char* func_display_name,
+                                        const char* scope_name,
+                                        DeclaredFunc* df,
+                                        int arg_count,
+                                        ASTNode* call_node) {
+    if (df == NULL || df->node == NULL) return;
+    
+    int expected_params = 0;
+    int is_var = 0;
+    ASTNode* p = df->node->params;
+    
+    // Si el primer parámetro es 'this' (método de clase), se omite para la llamada del usuario
+    if (p != NULL && p->name != NULL && strcmp(p->name, "this") == 0) {
+        p = p->next;
+    }
+    
+    while (p != NULL) {
+        if ((p->name && strcmp(p->name, "...") == 0) ||
+            (p->type_name && strcmp(p->type_name, "...") == 0)) {
+            is_var = 1;
+            break;
+        }
+        expected_params++;
+        p = p->next;
+    }
+    
+    // Funciones estándar conocidas que son variádicas
+    if (func_display_name != NULL) {
+        if (strcmp(func_display_name, "fundamental::printf") == 0 ||
+            strcmp(func_display_name, "printf") == 0 ||
+            strcmp(func_display_name, "sprintf") == 0 ||
+            strcmp(func_display_name, "snprintf") == 0 ||
+            strcmp(func_display_name, "fprintf") == 0 ||
+            strcmp(func_display_name, "scanf") == 0 ||
+            strcmp(func_display_name, "sscanf") == 0) {
+            is_var = 1;
+            if (expected_params == 0) expected_params = 1;
+        }
+    }
+    
+    int line = call_node ? call_node->line : 1;
+    int col = (call_node && call_node->column > 0) ? call_node->column : 1;
+    int tlen = func_display_name ? (int)strlen(func_display_name) : 1;
+    
+    if (is_var) {
+        if (arg_count < expected_params) {
+            char msg[512];
+            if (scope_name && strlen(scope_name) > 0) {
+                snprintf(msg, sizeof(msg),
+                         "el método '%s' de la clase '%s' espera al menos %d argumento(s), pero se proporcionaron %d",
+                         func_display_name ? func_display_name : "anónimo",
+                         scope_name, expected_params, arg_count);
+            } else {
+                snprintf(msg, sizeof(msg),
+                         "la función '%s' espera al menos %d argumento(s), pero se proporcionaron %d",
+                         func_display_name ? func_display_name : "anónima",
+                         expected_params, arg_count);
+            }
+            diag_error(generator_current_filename, generator_current_source,
+                       line, col, tlen, msg,
+                       "proporcione los argumentos requeridos para invocar la función");
+            exit(1);
+        }
+    } else {
+        if (arg_count != expected_params) {
+            char msg[512];
+            char sugg[256];
+            if (scope_name && strlen(scope_name) > 0) {
+                snprintf(msg, sizeof(msg),
+                         "el método '%s' de la clase '%s' espera %d argumento(s), pero se proporcionaron %d",
+                         func_display_name ? func_display_name : "anónimo",
+                         scope_name, expected_params, arg_count);
+            } else {
+                snprintf(msg, sizeof(msg),
+                         "la función '%s' espera %d argumento(s), pero se proporcionaron %d",
+                         func_display_name ? func_display_name : "anónima",
+                         expected_params, arg_count);
+            }
+            snprintf(sugg, sizeof(sugg),
+                     arg_count < expected_params ?
+                     "faltan argumentos; verifique la firma declarada" :
+                     "demasiados argumentos; verifique la firma declarada");
+            diag_error(generator_current_filename, generator_current_source,
+                       line, col, tlen, msg, sugg);
+            exit(1);
+        }
+    }
+}
+
 static void generate_call(ASTNode* node, FILE* out) {
     // Recopilar argumentos
     ASTNode* arg_array[64];
@@ -1639,6 +2026,7 @@ static void generate_call(ASTNode* node, FILE* out) {
         }
 
         if (df != NULL) {
+            validate_function_call_args(method_name, df->namespace_prefix ? df->namespace_prefix : class_name, df, arg_count, node);
             if (df->node != NULL) {
                 if (df->node->access_level == ACCESS_PRIVATE) {
                     if (current_func_namespace == NULL || strcmp(current_func_namespace, df->namespace_prefix) != 0) {
@@ -1739,37 +2127,82 @@ static void generate_call(ASTNode* node, FILE* out) {
     if (is_print || is_println) {
         if (arg_count == 0) {
             if (is_println) {
+                if (target_bits == 64) {
+                    fprintf(out, "    call fundamental_println_empty\n");
+                } else {
+#if defined(__linux__) || defined(__ELF__)
+                    fprintf(out, "    call fundamental_println_empty\n");
+#else
+                    fprintf(out, "    call _fundamental_println_empty\n");
+#endif
+                }
+            }
+            return;
+        }
+        for (int i = 0; i < arg_count; i++) {
+            if (is_any_float_expr(arg_array[i])) {
+                generate_expression(arg_array[i], out);
+                if (is_float_expr(arg_array[i]) && !is_double_expr(arg_array[i])) {
+                    fprintf(out, "    cvtss2sd %%xmm0, %%xmm0\n");
+                }
+                if (target_bits == 64) {
+#if defined(__linux__) || defined(__ELF__)
+                    fprintf(out, "    call fundamental_print_float\n");
+#else
+                    fprintf(out, "    subq $32, %%rsp\n");
+                    fprintf(out, "    call fundamental_print_float\n");
+                    fprintf(out, "    addq $32, %%rsp\n");
+#endif
+                } else {
+                    fprintf(out, "    subl $8, %%esp\n");
+                    fprintf(out, "    movsd %%xmm0, (%%esp)\n");
+#if defined(__linux__) || defined(__ELF__)
+                    fprintf(out, "    call fundamental_print_float\n");
+#else
+                    fprintf(out, "    call _fundamental_print_float\n");
+#endif
+                    fprintf(out, "    addl $8, %%esp\n");
+                }
+            } else {
+                push_arg_efficiently(arg_array[i], out);
+                if (is_string_expression(arg_array[i])) {
+                    if (target_bits == 64) {
+                        fprintf(out, "    call fundamental_print_str\n");
+                    } else {
+#if defined(__linux__) || defined(__ELF__)
+                        fprintf(out, "    call fundamental_print_str\n");
+#else
+                        fprintf(out, "    call _fundamental_print_str\n");
+#endif
+                    }
+                } else {
+                    if (target_bits == 64) {
+                        fprintf(out, "    call fundamental_print_int\n");
+                    } else {
+#if defined(__linux__) || defined(__ELF__)
+                        fprintf(out, "    call fundamental_print_int\n");
+#else
+                        fprintf(out, "    call _fundamental_print_int\n");
+#endif
+                    }
+                }
+                if (target_bits == 64) {
+                    fprintf(out, "    addq $8, %%rsp\n");
+                } else {
+                    fprintf(out, "    addl $4, %%esp\n");
+                }
+            }
+        }
+        if (is_println) {
+            if (target_bits == 64) {
+                fprintf(out, "    call fundamental_println_empty\n");
+            } else {
 #if defined(__linux__) || defined(__ELF__)
                 fprintf(out, "    call fundamental_println_empty\n");
 #else
                 fprintf(out, "    call _fundamental_println_empty\n");
 #endif
             }
-            return;
-        }
-        for (int i = 0; i < arg_count; i++) {
-            push_arg_efficiently(arg_array[i], out);
-            if (is_string_expression(arg_array[i])) {
-#if defined(__linux__) || defined(__ELF__)
-                fprintf(out, "    call fundamental_print_str\n");
-#else
-                fprintf(out, "    call _fundamental_print_str\n");
-#endif
-            } else {
-#if defined(__linux__) || defined(__ELF__)
-                fprintf(out, "    call fundamental_print_int\n");
-#else
-                fprintf(out, "    call _fundamental_print_int\n");
-#endif
-            }
-            fprintf(out, "    addl $4, %%esp\n");
-        }
-        if (is_println) {
-#if defined(__linux__) || defined(__ELF__)
-            fprintf(out, "    call fundamental_println_empty\n");
-#else
-            fprintf(out, "    call _fundamental_println_empty\n");
-#endif
         }
         return;
     }
@@ -1791,21 +2224,37 @@ static void generate_call(ASTNode* node, FILE* out) {
                 }
             }
             generate_expression(arg_array[0], out);
-            fprintf(out, "    pushl %%eax\n");
-            if (is_int) {
-#if defined(__linux__) || defined(__ELF__)
-                fprintf(out, "    call fundamental_read_int\n");
-#else
-                fprintf(out, "    call _fundamental_read_int\n");
-#endif
+            if (target_bits == 64) {
+                fprintf(out, "    pushq %%rax\n");
             } else {
-#if defined(__linux__) || defined(__ELF__)
-                fprintf(out, "    call fundamental_read_str\n");
-#else
-                fprintf(out, "    call _fundamental_read_str\n");
-#endif
+                fprintf(out, "    pushl %%eax\n");
             }
-            fprintf(out, "    addl $4, %%esp\n");
+            if (is_int) {
+                if (target_bits == 64) {
+                    fprintf(out, "    call fundamental_read_int\n");
+                } else {
+#if defined(__linux__) || defined(__ELF__)
+                    fprintf(out, "    call fundamental_read_int\n");
+#else
+                    fprintf(out, "    call _fundamental_read_int\n");
+#endif
+                }
+            } else {
+                if (target_bits == 64) {
+                    fprintf(out, "    call fundamental_read_str\n");
+                } else {
+#if defined(__linux__) || defined(__ELF__)
+                    fprintf(out, "    call fundamental_read_str\n");
+#else
+                    fprintf(out, "    call _fundamental_read_str\n");
+#endif
+                }
+            }
+            if (target_bits == 64) {
+                fprintf(out, "    addq $8, %%rsp\n");
+            } else {
+                fprintf(out, "    addl $4, %%esp\n");
+            }
         }
         return;
     }
@@ -1823,6 +2272,7 @@ static void generate_call(ASTNode* node, FILE* out) {
                 if (s_sd) m = find_exact_declared_function(target_func, s_sd->name);
             }
             if (m != NULL) {
+                validate_function_call_args(target_func, m->namespace_prefix ? m->namespace_prefix : cur_sd->name, m, arg_count, node);
                 for (int i = arg_count - 1; i >= 0; i--) {
                     push_arg_efficiently(arg_array[i], out);
                 }
@@ -1854,6 +2304,10 @@ static void generate_call(ASTNode* node, FILE* out) {
                 return;
             }
         }
+    }
+    
+    if (df != NULL) {
+        validate_function_call_args(target_func, df->namespace_prefix, df, arg_count, node);
     }
     
     // 3. Expansión INLINE cuando la función está marcada con inline o en optimización -O2/-O3
@@ -1950,84 +2404,137 @@ static void generate_call(ASTNode* node, FILE* out) {
     }
     
     char asm_call_name[512];
-    if (strcmp(target_func, "fundamental::printf") == 0) {
-#if defined(__linux__) || defined(__ELF__)
-        strcpy(asm_call_name, "fundamental_printf");
-#else
-        strcpy(asm_call_name, "_fundamental_printf");
-#endif
-    } else if (strcmp(target_func, "printf") == 0) {
-#if defined(__linux__) || defined(__ELF__)
-        strcpy(asm_call_name, "printf");
-#else
-        strcpy(asm_call_name, "_printf");
-#endif
-    } else if (strcmp(target_func, "fundamental::puts") == 0) {
-#if defined(__linux__) || defined(__ELF__)
-        strcpy(asm_call_name, "fundamental_puts");
-#else
-        strcpy(asm_call_name, "_fundamental_puts");
-#endif
-    } else if (strcmp(target_func, "puts") == 0) {
-#if defined(__linux__) || defined(__ELF__)
-        strcpy(asm_call_name, "puts");
-#else
-        strcpy(asm_call_name, "_puts");
-#endif
-    } else if (df != NULL) {
-        if (df->namespace_prefix != NULL) {
-            char clean_ns[256];
-            int c_idx = 0;
-            for (int i = 0; df->namespace_prefix[i] != '\0' && c_idx < 250; i++) {
-                if (df->namespace_prefix[i] == ':' && df->namespace_prefix[i+1] == ':') {
-                    clean_ns[c_idx++] = '_';
+    if (target_bits == 64) {
+        if (strcmp(target_func, "fundamental::printf") == 0) {
+            strcpy(asm_call_name, "fundamental_printf");
+        } else if (strcmp(target_func, "printf") == 0) {
+            strcpy(asm_call_name, "printf");
+        } else if (strcmp(target_func, "fundamental::puts") == 0) {
+            strcpy(asm_call_name, "fundamental_puts");
+        } else if (strcmp(target_func, "puts") == 0) {
+            strcpy(asm_call_name, "puts");
+        } else if (df != NULL) {
+            if (df->namespace_prefix != NULL) {
+                char clean_ns[256];
+                int c_idx = 0;
+                for (int i = 0; df->namespace_prefix[i] != '\0' && c_idx < 250; i++) {
+                    if (df->namespace_prefix[i] == ':' && df->namespace_prefix[i+1] == ':') {
+                        clean_ns[c_idx++] = '_';
+                        i++;
+                    } else {
+                        clean_ns[c_idx++] = df->namespace_prefix[i];
+                    }
+                }
+                clean_ns[c_idx] = '\0';
+                sprintf(asm_call_name, "%s_%s", clean_ns, df->name);
+            } else {
+                sprintf(asm_call_name, "%s", df->name);
+            }
+        } else {
+            char* resolved_tf = resolve_scoped_namespace_aliases(target_func);
+            UsingSymbol* us = find_using_symbol(resolved_tf);
+            if (us != NULL) {
+                free(resolved_tf);
+                resolved_tf = strdup(us->full_scoped_name);
+            }
+            char mangled[256];
+            int m_idx = 0;
+            for (int i = 0; resolved_tf[i] != '\0' && m_idx < 250; i++) {
+                if (resolved_tf[i] == ':' && resolved_tf[i+1] == ':') {
+                    mangled[m_idx++] = '_';
                     i++;
                 } else {
-                    clean_ns[c_idx++] = df->namespace_prefix[i];
+                    mangled[m_idx++] = resolved_tf[i];
                 }
             }
-            clean_ns[c_idx] = '\0';
-#if defined(__linux__) || defined(__ELF__)
-            sprintf(asm_call_name, "%s_%s", clean_ns, df->name);
-#else
-            sprintf(asm_call_name, "_%s_%s", clean_ns, df->name);
-#endif
-        } else {
-#if defined(__linux__) || defined(__ELF__)
-            sprintf(asm_call_name, "%s", df->name);
-#else
-            sprintf(asm_call_name, "_%s", df->name);
-#endif
+            mangled[m_idx] = '\0';
+            sprintf(asm_call_name, "%s", mangled);
+            free(resolved_tf);
         }
     } else {
-        char* resolved_tf = resolve_scoped_namespace_aliases(target_func);
-        UsingSymbol* us = find_using_symbol(resolved_tf);
-        if (us != NULL) {
-            free(resolved_tf);
-            resolved_tf = strdup(us->full_scoped_name);
-        }
-        char mangled[256];
-        int m_idx = 0;
-        for (int i = 0; resolved_tf[i] != '\0' && m_idx < 250; i++) {
-            if (resolved_tf[i] == ':' && resolved_tf[i+1] == ':') {
-                mangled[m_idx++] = '_';
-                i++;
-            } else {
-                mangled[m_idx++] = resolved_tf[i];
-            }
-        }
-        mangled[m_idx] = '\0';
+        if (strcmp(target_func, "fundamental::printf") == 0) {
 #if defined(__linux__) || defined(__ELF__)
-        sprintf(asm_call_name, "%s", mangled);
+            strcpy(asm_call_name, "fundamental_printf");
 #else
-        sprintf(asm_call_name, "_%s", mangled);
+            strcpy(asm_call_name, "_fundamental_printf");
 #endif
-        free(resolved_tf);
+        } else if (strcmp(target_func, "printf") == 0) {
+#if defined(__linux__) || defined(__ELF__)
+            strcpy(asm_call_name, "printf");
+#else
+            strcpy(asm_call_name, "_printf");
+#endif
+        } else if (strcmp(target_func, "fundamental::puts") == 0) {
+#if defined(__linux__) || defined(__ELF__)
+            strcpy(asm_call_name, "fundamental_puts");
+#else
+            strcpy(asm_call_name, "_fundamental_puts");
+#endif
+        } else if (strcmp(target_func, "puts") == 0) {
+#if defined(__linux__) || defined(__ELF__)
+            strcpy(asm_call_name, "puts");
+#else
+            strcpy(asm_call_name, "_puts");
+#endif
+        } else if (df != NULL) {
+            if (df->namespace_prefix != NULL) {
+                char clean_ns[256];
+                int c_idx = 0;
+                for (int i = 0; df->namespace_prefix[i] != '\0' && c_idx < 250; i++) {
+                    if (df->namespace_prefix[i] == ':' && df->namespace_prefix[i+1] == ':') {
+                        clean_ns[c_idx++] = '_';
+                        i++;
+                    } else {
+                        clean_ns[c_idx++] = df->namespace_prefix[i];
+                    }
+                }
+                clean_ns[c_idx] = '\0';
+#if defined(__linux__) || defined(__ELF__)
+                sprintf(asm_call_name, "%s_%s", clean_ns, df->name);
+#else
+                sprintf(asm_call_name, "_%s_%s", clean_ns, df->name);
+#endif
+            } else {
+#if defined(__linux__) || defined(__ELF__)
+                sprintf(asm_call_name, "%s", df->name);
+#else
+                sprintf(asm_call_name, "_%s", df->name);
+#endif
+            }
+        } else {
+            char* resolved_tf = resolve_scoped_namespace_aliases(target_func);
+            UsingSymbol* us = find_using_symbol(resolved_tf);
+            if (us != NULL) {
+                free(resolved_tf);
+                resolved_tf = strdup(us->full_scoped_name);
+            }
+            char mangled[256];
+            int m_idx = 0;
+            for (int i = 0; resolved_tf[i] != '\0' && m_idx < 250; i++) {
+                if (resolved_tf[i] == ':' && resolved_tf[i+1] == ':') {
+                    mangled[m_idx++] = '_';
+                    i++;
+                } else {
+                    mangled[m_idx++] = resolved_tf[i];
+                }
+            }
+            mangled[m_idx] = '\0';
+#if defined(__linux__) || defined(__ELF__)
+            sprintf(asm_call_name, "%s", mangled);
+#else
+            sprintf(asm_call_name, "_%s", mangled);
+#endif
+            free(resolved_tf);
+        }
     }
     
     fprintf(out, "    call %s\n", asm_call_name);
     if (arg_count > 0) {
-        fprintf(out, "    addl $%d, %%esp\n", arg_count * 4);
+        if (target_bits == 64) {
+            fprintf(out, "    addq $%d, %%rsp\n", arg_count * 8);
+        } else {
+            fprintf(out, "    addl $%d, %%esp\n", arg_count * 4);
+        }
     }
 }
 
@@ -2035,11 +2542,33 @@ static void generate_expression(ASTNode* node, FILE* out) {
     if (node == NULL) return;
     
     switch (node->type) {
+        case AST_FLOAT_LITERAL: {
+            int fid = get_or_add_float_literal(node->double_value, node->is_double);
+            if (node->is_double) {
+                if (target_bits == 64) {
+                    fprintf(out, "    movsd .LC_DBL_%d(%%rip), %%xmm0\n", fid);
+                } else {
+                    fprintf(out, "    movsd .LC_DBL_%d, %%xmm0\n", fid);
+                }
+            } else {
+                if (target_bits == 64) {
+                    fprintf(out, "    movss .LC_FLT_%d(%%rip), %%xmm0\n", fid);
+                } else {
+                    fprintf(out, "    movss .LC_FLT_%d, %%xmm0\n", fid);
+                }
+            }
+            break;
+        }
+
         case AST_NUMBER:
             if (node->int_value == 0) {
                 fprintf(out, "    xorl %%eax, %%eax\n");
             } else {
-                fprintf(out, "    movl $%d, %%eax\n", node->int_value);
+                if (target_bits == 64 && node->is_64bit) {
+                    fprintf(out, "    movabsq $%lld, %%rax\n", (long long)node->int_value);
+                } else {
+                    fprintf(out, "    movl $%d, %%eax\n", node->int_value);
+                }
             }
             break;
             
@@ -2052,51 +2581,98 @@ static void generate_expression(ASTNode* node, FILE* out) {
             break;
 
         case AST_NULL:
-            fprintf(out, "    xorl %%eax, %%eax\n");
+            if (target_bits == 64) fprintf(out, "    xorq %%rax, %%rax\n");
+            else fprintf(out, "    xorl %%eax, %%eax\n");
             break;
 
         case AST_STRING:
-            fprintf(out, "    movl $.LC%d, %%eax\n", node->int_value);
+            if (target_bits == 64) {
+#if defined(__linux__) || defined(__ELF__)
+                fprintf(out, "    leaq .LC%d(%%rip), %%rax\n", node->int_value);
+#else
+                fprintf(out, "    leaq .LC%d(%%rip), %%rax\n", node->int_value);
+#endif
+            } else {
+                fprintf(out, "    movl $.LC%d, %%eax\n", node->int_value);
+            }
             break;
             
         case AST_THIS: {
             Symbol* this_sym = find_symbol("this");
-            int this_off = this_sym ? this_sym->stack_offset : 8;
-            fprintf(out, "    movl %d(%%ebp), %%eax\n", this_off);
+            int this_off = this_sym ? this_sym->stack_offset : ((target_bits == 64) ? 16 : 8);
+            if (target_bits == 64) fprintf(out, "    movq %d(%%rbp), %%rax\n", this_off);
+            else fprintf(out, "    movl %d(%%ebp), %%eax\n", this_off);
             break;
         }
 
         case AST_IDENTIFIER: {
             Symbol* sym = find_symbol(node->name);
+            const char* bp = (target_bits == 64) ? "rbp" : "ebp";
             if (sym != NULL) {
-                if (sym->is_static && sym->asm_name != NULL) {
+                if (sym->is_float) {
+                    if (sym->is_static && sym->asm_name != NULL) {
+                        fprintf(out, "    movss %s, %%xmm0\n", sym->asm_name);
+                    } else {
+                        fprintf(out, "    movss %d(%%%s), %%xmm0\n", sym->stack_offset, bp);
+                    }
+                } else if (sym->is_double) {
+                    if (sym->is_static && sym->asm_name != NULL) {
+                        fprintf(out, "    movsd %s, %%xmm0\n", sym->asm_name);
+                    } else {
+                        fprintf(out, "    movsd %d(%%%s), %%xmm0\n", sym->stack_offset, bp);
+                    }
+                } else if (sym->is_64bit) {
+                    if (sym->is_static && sym->asm_name != NULL) {
+                        fprintf(out, "    movq %s, %%rax\n", sym->asm_name);
+                    } else {
+                        fprintf(out, "    movq %d(%%%s), %%rax\n", sym->stack_offset, bp);
+                    }
+                } else if (sym->is_static && sym->asm_name != NULL) {
                     if (sym->is_string || sym->is_array) {
-                        fprintf(out, "    leal %s, %%eax\n", sym->asm_name);
+                        if (target_bits == 64) fprintf(out, "    leaq %s, %%rax\n", sym->asm_name);
+                        else fprintf(out, "    leal %s, %%eax\n", sym->asm_name);
                     } else {
                         fprintf(out, "    movl %s, %%eax\n", sym->asm_name);
                     }
                 } else if ((sym->is_string && !sym->is_param) || sym->is_array) {
-                    fprintf(out, "    leal %d(%%ebp), %%eax\n", sym->stack_offset);
+                    if (target_bits == 64) fprintf(out, "    leaq %d(%%%s), %%rax\n", sym->stack_offset, bp);
+                    else fprintf(out, "    leal %d(%%%s), %%eax\n", sym->stack_offset, bp);
                 } else {
-                    fprintf(out, "    movl %d(%%ebp), %%eax\n", sym->stack_offset);
+                    fprintf(out, "    movl %d(%%%s), %%eax\n", sym->stack_offset, bp);
                 }
             } else {
                 StructDef* cur_sd = (current_func_namespace != NULL) ? find_struct_def(current_func_namespace) : NULL;
                 StructFieldInfo* f = cur_sd ? find_struct_field(cur_sd, node->name) : NULL;
                 if (f != NULL) {
                     Symbol* this_sym = find_symbol("this");
-                    int this_off = this_sym ? this_sym->stack_offset : 8;
-                    fprintf(out, "    movl %d(%%ebp), %%edx\n", this_off);
-                    if (f->is_string) {
-                        fprintf(out, "    leal %d(%%edx), %%eax\n", f->offset);
+                    int this_off = this_sym ? this_sym->stack_offset : ((target_bits == 64) ? 16 : 8);
+                    if (target_bits == 64) {
+                        fprintf(out, "    movq %d(%%rbp), %%rdx\n", this_off);
+                        if (f->is_string) {
+                            fprintf(out, "    leaq %d(%%rdx), %%rax\n", f->offset);
+                        } else {
+                            fprintf(out, "    movl %d(%%rdx), %%eax\n", f->offset);
+                        }
                     } else {
-                        fprintf(out, "    movl %d(%%edx), %%eax\n", f->offset);
+                        fprintf(out, "    movl %d(%%ebp), %%edx\n", this_off);
+                        if (f->is_string) {
+                            fprintf(out, "    leal %d(%%edx), %%eax\n", f->offset);
+                        } else {
+                            fprintf(out, "    movl %d(%%edx), %%eax\n", f->offset);
+                        }
                     }
                 } else {
                     GlobalVar* gv = find_global_var(node->name);
                     if (gv != NULL) {
-                        if (gv->is_string || gv->is_array) {
-                            fprintf(out, "    leal %s, %%eax\n", gv->asm_name);
+                        if (gv->is_float) {
+                            fprintf(out, "    movss %s, %%xmm0\n", gv->asm_name);
+                        } else if (gv->is_double) {
+                            fprintf(out, "    movsd %s, %%xmm0\n", gv->asm_name);
+                        } else if (gv->is_64bit) {
+                            fprintf(out, "    movq %s, %%rax\n", gv->asm_name);
+                        } else if (gv->is_string || gv->is_array) {
+                            if (target_bits == 64) fprintf(out, "    leaq %s, %%rax\n", gv->asm_name);
+                            else fprintf(out, "    leal %s, %%eax\n", gv->asm_name);
                         } else if (gv->is_const && gv->string_val == NULL && (gv->init_node == NULL || gv->init_node->type == AST_NUMBER)) {
                             fprintf(out, "    movl $%d, %%eax\n", gv->int_val);
                         } else {
@@ -2831,6 +3407,73 @@ static void generate_expression(ASTNode* node, FILE* out) {
         }
             
         case AST_BINARY_EXPR: {
+            if (is_any_float_expr(node)) {
+                int is_dbl = is_double_expr(node);
+                int left_flt = is_any_float_expr(node->left);
+                int right_flt = is_any_float_expr(node->right);
+
+                generate_expression(node->left, out);
+                if (!left_flt) {
+                    if (is_dbl) fprintf(out, "    cvtsi2sd %%eax, %%xmm0\n");
+                    else fprintf(out, "    cvtsi2ss %%eax, %%xmm0\n");
+                } else if (is_dbl && !is_double_expr(node->left)) {
+                    fprintf(out, "    cvtss2sd %%xmm0, %%xmm0\n");
+                }
+
+                if (target_bits == 64) {
+                    fprintf(out, "    subq $16, %%rsp\n");
+                    fprintf(out, "    movsd %%xmm0, (%%rsp)\n");
+                } else {
+                    fprintf(out, "    subl $8, %%esp\n");
+                    fprintf(out, "    movsd %%xmm0, (%%esp)\n");
+                }
+
+                generate_expression(node->right, out);
+                if (!right_flt) {
+                    if (is_dbl) fprintf(out, "    cvtsi2sd %%eax, %%xmm0\n");
+                    else fprintf(out, "    cvtsi2ss %%eax, %%xmm0\n");
+                } else if (is_dbl && !is_double_expr(node->right)) {
+                    fprintf(out, "    cvtss2sd %%xmm0, %%xmm0\n");
+                }
+
+                if (is_dbl) fprintf(out, "    movsd %%xmm0, %%xmm1\n");
+                else fprintf(out, "    movss %%xmm0, %%xmm1\n");
+
+                if (target_bits == 64) {
+                    fprintf(out, "    movsd (%%rsp), %%xmm0\n");
+                    fprintf(out, "    addq $16, %%rsp\n");
+                } else {
+                    fprintf(out, "    movsd (%%esp), %%xmm0\n");
+                    fprintf(out, "    addl $8, %%esp\n");
+                }
+
+                if (node->op == '+') {
+                    if (is_dbl) fprintf(out, "    addsd %%xmm1, %%xmm0\n");
+                    else fprintf(out, "    addss %%xmm1, %%xmm0\n");
+                } else if (node->op == '-') {
+                    if (is_dbl) fprintf(out, "    subsd %%xmm1, %%xmm0\n");
+                    else fprintf(out, "    subss %%xmm1, %%xmm0\n");
+                } else if (node->op == '*') {
+                    if (is_dbl) fprintf(out, "    mulsd %%xmm1, %%xmm0\n");
+                    else fprintf(out, "    mulss %%xmm1, %%xmm0\n");
+                } else if (node->op == '/') {
+                    if (is_dbl) fprintf(out, "    divsd %%xmm1, %%xmm0\n");
+                    else fprintf(out, "    divss %%xmm1, %%xmm0\n");
+                } else if (node->op == '<' || node->op == '>' || node->op == 'L' ||
+                           node->op == 'G' || node->op == 'E' || node->op == 'N') {
+                    if (is_dbl) fprintf(out, "    ucomisd %%xmm1, %%xmm0\n");
+                    else fprintf(out, "    ucomiss %%xmm1, %%xmm0\n");
+                    if (node->op == '<') fprintf(out, "    setb %%al\n");
+                    else if (node->op == '>') fprintf(out, "    seta %%al\n");
+                    else if (node->op == 'L') fprintf(out, "    setbe %%al\n");
+                    else if (node->op == 'G') fprintf(out, "    setae %%al\n");
+                    else if (node->op == 'E') fprintf(out, "    sete %%al\n");
+                    else if (node->op == 'N') fprintf(out, "    setne %%al\n");
+                    fprintf(out, "    movzbl %%al, %%eax\n");
+                }
+                break;
+            }
+
             // Constant Folding si ambos operandos son números o NULL
             if ((node->left->type == AST_NUMBER || node->left->type == AST_NULL) &&
                 (node->right->type == AST_NUMBER || node->right->type == AST_NULL)) {
@@ -3191,6 +3834,16 @@ static void generate_condition_jump(ASTNode* cond, int jump_if_true, const char*
         int is_cmp = (cmp_op == '<' || cmp_op == '>' || cmp_op == 'L' || cmp_op == 'G' || cmp_op == 'E' || cmp_op == 'N');
         
         if (is_cmp) {
+            if (is_any_float_expr(cond)) {
+                generate_expression(cond, out);
+                fprintf(out, "    testl %%eax, %%eax\n");
+                if (jump_if_true) {
+                    fprintf(out, "    jnz %s\n", target_label);
+                } else {
+                    fprintf(out, "    jz %s\n", target_label);
+                }
+                return;
+            }
             char mem_ref[64];
             
             // Subcaso A: Comparación con constante inmediata a la derecha (expr OP imm)
@@ -3542,14 +4195,18 @@ static void generate_statement(ASTNode* node, FILE* out) {
                             cargs[carg_count++] = ca;
                             ca = ca->next;
                         }
+                        DeclaredFunc* d_ctor = find_exact_declared_function(sd->name, sd->name);
+                        if (!d_ctor) d_ctor = find_exact_declared_function("constructor", sd->name);
+                        if (d_ctor != NULL) {
+                            validate_function_call_args(sd->name, sd->name, d_ctor, carg_count, call);
+                        }
+
                         for (int i = carg_count - 1; i >= 0; i--) {
                             push_arg_efficiently(cargs[i], out);
                         }
                         fprintf(out, "    leal %d(%%ebp), %%eax\n", sym->stack_offset);
                         fprintf(out, "    pushl %%eax\n");
 
-                        DeclaredFunc* d_ctor = find_exact_declared_function(sd->name, sd->name);
-                        if (!d_ctor) d_ctor = find_exact_declared_function("constructor", sd->name);
                         if (d_ctor != NULL) {
                             char ctor_label[512];
                             #if defined(__linux__) || defined(__ELF__)
@@ -3581,28 +4238,41 @@ static void generate_statement(ASTNode* node, FILE* out) {
                         }
                     }
                 }
+                const char* bp = (target_bits == 64) ? "rbp" : "ebp";
                 if (node->init_value != NULL) {
-                    if (node->init_value->type == AST_NUMBER) {
-                        fprintf(out, "    movl $%d, %d(%%ebp)\n", node->init_value->int_value, sym->stack_offset);
-                    } else if (node->init_value->type == AST_NULL) {
-                        fprintf(out, "    movl $0, %d(%%ebp)\n", sym->stack_offset);
-                    } else if (node->init_value->type == AST_IDENTIFIER) {
-                        int eval = 0;
-                        if (find_constant(node->init_value->name, &eval)) {
-                            fprintf(out, "    movl $%d, %d(%%ebp)\n", eval, sym->stack_offset);
-                        } else {
-                            generate_expression(node->init_value, out);
-                            fprintf(out, "    movl %%eax, %d(%%ebp)\n", sym->stack_offset);
+                    generate_expression(node->init_value, out);
+                    if (sym->is_float) {
+                        if (!is_any_float_expr(node->init_value)) {
+                            fprintf(out, "    cvtsi2ss %%eax, %%xmm0\n");
+                        } else if (is_double_expr(node->init_value)) {
+                            fprintf(out, "    cvtsd2ss %%xmm0, %%xmm0\n");
                         }
+                        fprintf(out, "    movss %%xmm0, %d(%%%s)\n", sym->stack_offset, bp);
+                    } else if (sym->is_double) {
+                        if (!is_any_float_expr(node->init_value)) {
+                            fprintf(out, "    cvtsi2sd %%eax, %%xmm0\n");
+                        } else if (!is_double_expr(node->init_value)) {
+                            fprintf(out, "    cvtss2sd %%xmm0, %%xmm0\n");
+                        }
+                        fprintf(out, "    movsd %%xmm0, %d(%%%s)\n", sym->stack_offset, bp);
+                    } else if (sym->is_64bit) {
+                        fprintf(out, "    movq %%rax, %d(%%%s)\n", sym->stack_offset, bp);
                     } else {
-                        generate_expression(node->init_value, out);
-                        fprintf(out, "    movl %%eax, %d(%%ebp)\n", sym->stack_offset);
+                        fprintf(out, "    movl %%eax, %d(%%%s)\n", sym->stack_offset, bp);
                     }
                 } else if (sym->is_string) {
-                    // Inicializar buffer a cadena vacía
-                    fprintf(out, "    movb $0, %d(%%ebp)\n", sym->stack_offset);
+                    fprintf(out, "    movb $0, %d(%%%s)\n", sym->stack_offset, bp);
+                } else if (sym->is_float) {
+                    fprintf(out, "    movl $0, %d(%%%s)\n", sym->stack_offset, bp);
+                } else if (sym->is_double || sym->is_64bit) {
+                    if (target_bits == 64) {
+                        fprintf(out, "    movq $0, %d(%%%s)\n", sym->stack_offset, bp);
+                    } else {
+                        fprintf(out, "    movl $0, %d(%%%s)\n", sym->stack_offset, bp);
+                        fprintf(out, "    movl $0, %d(%%%s)\n", sym->stack_offset + 4, bp);
+                    }
                 } else if (!sym->is_array) {
-                    fprintf(out, "    movl $0, %d(%%ebp)\n", sym->stack_offset);
+                    fprintf(out, "    movl $0, %d(%%%s)\n", sym->stack_offset, bp);
                 }
             }
             break;
@@ -3613,14 +4283,38 @@ static void generate_statement(ASTNode* node, FILE* out) {
                 Symbol* sym = find_symbol(node->left->name);
                 if (sym != NULL) {
                     if (sym->is_const) {
-                        printf("Error semántico: no se puede modificar la variable constante '%s' en la línea %d\n", sym->name, node->line);
+                        printf("Error semantico: no se puede modificar la variable constante '%s' en la linea %d\n", sym->name, node->line);
                         exit(1);
                     }
+                    const char* bp = (target_bits == 64) ? "rbp" : "ebp";
                     char dest[64];
                     if (sym->is_static && sym->asm_name != NULL) {
                         strcpy(dest, sym->asm_name);
                     } else {
-                        sprintf(dest, "%d(%%ebp)", sym->stack_offset);
+                        sprintf(dest, "%d(%%%s)", sym->stack_offset, bp);
+                    }
+                    if (sym->is_float) {
+                        generate_expression(node->init_value, out);
+                        if (!is_any_float_expr(node->init_value)) {
+                            fprintf(out, "    cvtsi2ss %%eax, %%xmm0\n");
+                        } else if (is_double_expr(node->init_value)) {
+                            fprintf(out, "    cvtsd2ss %%xmm0, %%xmm0\n");
+                        }
+                        fprintf(out, "    movss %%xmm0, %s\n", dest);
+                        break;
+                    } else if (sym->is_double) {
+                        generate_expression(node->init_value, out);
+                        if (!is_any_float_expr(node->init_value)) {
+                            fprintf(out, "    cvtsi2sd %%eax, %%xmm0\n");
+                        } else if (!is_double_expr(node->init_value)) {
+                            fprintf(out, "    cvtss2sd %%xmm0, %%xmm0\n");
+                        }
+                        fprintf(out, "    movsd %%xmm0, %s\n", dest);
+                        break;
+                    } else if (sym->is_64bit) {
+                        generate_expression(node->init_value, out);
+                        fprintf(out, "    movq %%rax, %s\n", dest);
+                        break;
                     }
                     // Optimización de auto-asignación directa: dest = dest OP imm
                     if (node->init_value->type == AST_BINARY_EXPR &&
@@ -3678,8 +4372,25 @@ static void generate_statement(ASTNode* node, FILE* out) {
                     GlobalVar* gv = find_global_var(node->left->name);
                     if (gv != NULL) {
                         if (gv->is_const) {
-                            printf("Error semántico: no se puede modificar la variable constante '%s' en la línea %d\n", gv->name, node->line);
+                            printf("Error semantico: no se puede modificar la variable constante '%s' en la linea %d\n", gv->name, node->line);
                             exit(1);
+                        }
+                        if (gv->is_float) {
+                            generate_expression(node->init_value, out);
+                            if (!is_any_float_expr(node->init_value)) fprintf(out, "    cvtsi2ss %%eax, %%xmm0\n");
+                            else if (is_double_expr(node->init_value)) fprintf(out, "    cvtsd2ss %%xmm0, %%xmm0\n");
+                            fprintf(out, "    movss %%xmm0, %s\n", gv->asm_name);
+                            break;
+                        } else if (gv->is_double) {
+                            generate_expression(node->init_value, out);
+                            if (!is_any_float_expr(node->init_value)) fprintf(out, "    cvtsi2sd %%eax, %%xmm0\n");
+                            else if (!is_double_expr(node->init_value)) fprintf(out, "    cvtss2sd %%xmm0, %%xmm0\n");
+                            fprintf(out, "    movsd %%xmm0, %s\n", gv->asm_name);
+                            break;
+                        } else if (gv->is_64bit) {
+                            generate_expression(node->init_value, out);
+                            fprintf(out, "    movq %%rax, %s\n", gv->asm_name);
+                            break;
                         }
                         if (node->init_value->type == AST_BINARY_EXPR &&
                             node->init_value->left->type == AST_IDENTIFIER &&
@@ -3947,8 +4658,13 @@ static void generate_statement(ASTNode* node, FILE* out) {
             if (current_inline_exit_label > 0) {
                 fprintf(out, "    jmp .Linline_exit_%d\n", current_inline_exit_label);
             } else {
-                fprintf(out, "    movl %%ebp, %%esp\n");
-                fprintf(out, "    popl %%ebp\n");
+                if (target_bits == 64) {
+                    fprintf(out, "    movq %%rbp, %%rsp\n");
+                    fprintf(out, "    popq %%rbp\n");
+                } else {
+                    fprintf(out, "    movl %%ebp, %%esp\n");
+                    fprintf(out, "    popl %%ebp\n");
+                }
                 fprintf(out, "    ret\n");
             }
             break;
@@ -4189,11 +4905,13 @@ static void generate_function(ASTNode* node, FILE* out) {
         strcpy(mangled_name, clean_name);
     }
     
-    // Registrar parámetros: 8(%ebp), 12(%ebp), etc.
+    // Registrar parámetros: 8(%ebp) o 16(%rbp)
     ASTNode* param = node->params;
     int param_idx = 0;
     while (param != NULL) {
-        int offset = 8 + (param_idx * 4);
+        int slot_size = (target_bits == 64) ? 8 : 4;
+        int base_off = (target_bits == 64) ? 16 : 8;
+        int offset = base_off + (param_idx * slot_size);
         int is_str = (param->type_name && strstr(param->type_name, "string") != NULL && strchr(param->type_name, '*') == NULL) ? 1 : 0;
         add_symbol(param->name, offset, 1, param->type_name, is_str, 0, 0, param->is_const);
         param_idx++;
@@ -4222,25 +4940,35 @@ static void generate_function(ASTNode* node, FILE* out) {
 #endif
     }
     if (!node->is_static) {
+        if (target_bits == 32) {
 #ifdef _WIN32
-        fprintf(out, ".globl _%s\n", mangled_name);
+            fprintf(out, ".globl _%s\n", mangled_name);
 #endif
+        }
         fprintf(out, ".globl %s\n", mangled_name);
 #if defined(__linux__) || defined(__ELF__)
         fprintf(out, ".type %s, @function\n", mangled_name);
 #endif
     }
+    if (target_bits == 32) {
 #ifdef _WIN32
-    fprintf(out, "_%s:\n", mangled_name);
+        fprintf(out, "_%s:\n", mangled_name);
 #endif
+    }
     fprintf(out, "%s:\n", mangled_name);
     
     // Prólogo (alineado a 16 bytes)
     int stack_alloc = current_offset + 32;
     stack_alloc = (stack_alloc + 15) & ~15;
-    fprintf(out, "    pushl %%ebp\n");
-    fprintf(out, "    movl %%esp, %%ebp\n");
-    fprintf(out, "    subl $%d, %%esp\n", stack_alloc);
+    if (target_bits == 64) {
+        fprintf(out, "    pushq %%rbp\n");
+        fprintf(out, "    movq %%rsp, %%rbp\n");
+        fprintf(out, "    subq $%d, %%rsp\n", stack_alloc);
+    } else {
+        fprintf(out, "    pushl %%ebp\n");
+        fprintf(out, "    movl %%esp, %%ebp\n");
+        fprintf(out, "    subl $%d, %%esp\n", stack_alloc);
+    }
     
     // Generar sentencias del cuerpo
     int has_explicit_return = 0;
@@ -4251,8 +4979,13 @@ static void generate_function(ASTNode* node, FILE* out) {
     // Epílogo por defecto si no terminó en return
     if (!has_explicit_return) {
         fprintf(out, "    xorl %%eax, %%eax\n");
-        fprintf(out, "    movl %%ebp, %%esp\n");
-        fprintf(out, "    popl %%ebp\n");
+        if (target_bits == 64) {
+            fprintf(out, "    movq %%rbp, %%rsp\n");
+            fprintf(out, "    popq %%rbp\n");
+        } else {
+            fprintf(out, "    movl %%ebp, %%esp\n");
+            fprintf(out, "    popl %%ebp\n");
+        }
         fprintf(out, "    ret\n");
     }
     active_usings = saved_active_usings;
@@ -4313,6 +5046,8 @@ static void generate_declarations(ASTNode* decl, FILE* out) {
 void generate_code(ASTNode* node, const char* output_filename) {
     inline_c_count = 0;
     inline_c_len = 0;
+    float_count = 0;
+    peephole_opts_count = 0;
     if (inline_c_buffer) inline_c_buffer[0] = '\0';
     snprintf(inline_c_file_path, sizeof(inline_c_file_path), "%s.inline_c.c", output_filename);
 
@@ -4322,9 +5057,10 @@ void generate_code(ASTNode* node, const char* output_filename) {
         exit(1);
     }
     
-    // 1. Recolectar literales de cadena
+    // 1. Recolectar literales de cadena y de punto flotante
     string_count = 0;
     collect_strings(node);
+    collect_floats(node);
     
     // 2. Liberar listas previas y registrar structs, funciones y variables globales declaradas
     while (declared_structs) { StructDef* n = declared_structs->next; free(declared_structs->name); free(declared_structs); declared_structs = n; }
@@ -4360,19 +5096,40 @@ void generate_code(ASTNode* node, const char* output_filename) {
         print_assembly_string(out, string_table[i].value);
         fprintf(out, "\n");
     }
+
+    // Formatos de punto flotante para fundamental::print / printf
+    fprintf(out, ".align 4\n.LC_FMT_FLT:\n    .asciz \"%%f\"\n");
+    fprintf(out, ".align 4\n.LC_FMT_FLT_NL:\n    .asciz \"%%f\\n\"\n");
+
+    // Emitir tabla inicial de constantes flotantes
+    int emitted_floats = 0;
+    for (int i = 0; i < float_count; i++) {
+        if (float_table[i].is_double) {
+            fprintf(out, ".align 8\n.LC_DBL_%d:\n    .double %.17g\n", i, float_table[i].value);
+        } else {
+            fprintf(out, ".align 4\n.LC_FLT_%d:\n    .float %.9g\n", i, (float)float_table[i].value);
+        }
+    }
+    emitted_floats = float_count;
     
     // Emitir constantes globales en .rdata
     GlobalVar* gv = declared_globals;
     while (gv != NULL) {
         if (gv->is_const) {
-            fprintf(out, ".align 4\n");
+            fprintf(out, ".align %d\n", (gv->is_double || gv->is_64bit) ? 8 : 4);
             fprintf(out, "%s:\n", gv->asm_name);
             if (gv->string_val != NULL) {
                 fprintf(out, "    .asciz ");
                 print_assembly_string(out, gv->string_val);
                 fprintf(out, "\n");
             } else if (gv->is_array && gv->array_size > 0) {
-                fprintf(out, "    .space %d\n", gv->array_size * 4);
+                fprintf(out, "    .space %d\n", gv->array_size * ((gv->is_double || gv->is_64bit) ? 8 : 4));
+            } else if (gv->is_float) {
+                fprintf(out, "    .float %.9g\n", (float)gv->double_val);
+            } else if (gv->is_double) {
+                fprintf(out, "    .double %.17g\n", gv->double_val);
+            } else if (gv->is_64bit) {
+                fprintf(out, "    .quad %lld\n", (long long)gv->int_val);
             } else {
                 fprintf(out, "    .long %d\n", gv->int_val);
             }
@@ -4392,14 +5149,20 @@ void generate_code(ASTNode* node, const char* output_filename) {
             if (!gv->is_static) {
                 fprintf(out, ".globl %s\n", gv->asm_name);
             }
-            fprintf(out, ".align 4\n");
+            fprintf(out, ".align %d\n", (gv->is_double || gv->is_64bit) ? 8 : 4);
             fprintf(out, "%s:\n", gv->asm_name);
             if (gv->string_val != NULL) {
                 fprintf(out, "    .asciz ");
                 print_assembly_string(out, gv->string_val);
                 fprintf(out, "\n");
             } else if (gv->is_array && gv->array_size > 0) {
-                fprintf(out, "    .space %d\n", gv->array_size * 4);
+                fprintf(out, "    .space %d\n", gv->array_size * ((gv->is_double || gv->is_64bit) ? 8 : 4));
+            } else if (gv->is_float) {
+                fprintf(out, "    .float %.9g\n", (float)gv->double_val);
+            } else if (gv->is_double) {
+                fprintf(out, "    .double %.17g\n", gv->double_val);
+            } else if (gv->is_64bit) {
+                fprintf(out, "    .quad %lld\n", (long long)gv->int_val);
             } else {
                 fprintf(out, "    .long %d\n", gv->int_val);
             }
@@ -4432,6 +5195,22 @@ void generate_code(ASTNode* node, const char* output_filename) {
                 fprintf(out, "    .long %d\n", slv->int_val);
             }
             slv = slv->next;
+        }
+    }
+
+    // 7. Emitir cualquier constante flotante restante creada dinámicamente
+    if (float_count > emitted_floats) {
+#if defined(__linux__) || defined(__ELF__)
+        fprintf(out, "\n.section .rodata\n");
+#else
+        fprintf(out, "\n.section .rdata\n");
+#endif
+        for (int i = emitted_floats; i < float_count; i++) {
+            if (float_table[i].is_double) {
+                fprintf(out, ".align 8\n.LC_DBL_%d:\n    .double %.17g\n", i, float_table[i].value);
+            } else {
+                fprintf(out, ".align 4\n.LC_FLT_%d:\n    .float %.9g\n", i, (float)float_table[i].value);
+            }
         }
     }
     

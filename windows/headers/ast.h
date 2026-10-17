@@ -40,6 +40,7 @@ typedef enum {
     AST_IDENTIFIER,
     AST_SCOPED_IDENTIFIER,
     AST_NUMBER,
+    AST_FLOAT_LITERAL,
     AST_STRING,
     AST_NULL,
     AST_CLASS,
@@ -57,6 +58,7 @@ typedef enum {
 typedef struct ASTNode {
     ASTNodeType type;
     int line;
+    int column;
     struct ASTNode* next; // Para encadenar listas (declaraciones, sentencias, params, campos, args)
 
     char* name;             // Nombre (función, variable, struct, namespace, campo, identificador)
@@ -89,6 +91,11 @@ typedef struct ASTNode {
 
     // Literales y arreglos
     int int_value;                // Valor entero, booleano (0/1), o is_postfix en inc_dec
+    double double_value;          // Valor para punto flotante (float / double)
+    int is_float;                 // 1 si la expresion o tipo es flotante (float o double)
+    int is_double;                // 1 si es double (64 bits), 0 si es float (32 bits)
+    int is_64bit;                 // 1 si es entero o puntero de 64 bits (int64, uint64, ptr)
+    int is_unsigned;              // 1 si es tipo sin signo (uint32, uint64, uint16, uint8)
     char* string_value;
     int is_array;                 // 1 si es declaración de arreglo
     int array_size;               // Tamaño del arreglo en elementos
