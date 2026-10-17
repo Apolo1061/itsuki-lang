@@ -1,0 +1,58 @@
+#pragma once
+
+#include <fundamental.suki>
+
+namespace math {
+
+    const int PI_APPROX = 31416;         // Pi escalado x10000 (3.1416)
+    const int E_APPROX = 27183;          // e escalado x10000 (2.7183)
+    const int SQRT2_APPROX = 14142;      // raiz(2) escalado x10000 (1.4142)
+    const int TRIG_SCALE = 1000;         // Escala para funciones trigonometricas (1.0 = 1000)
+    const int MAX_INT = 2147483647;
+    const int MIN_INT = -2147483648;
+
+    fn abs(x: int) -> int;
+    fn sign(x: int) -> int;
+    fn min(a: int, b: int) -> int;
+    fn max(a: int, b: int) -> int;
+    fn min3(a: int, b: int, c: int) -> int;
+    fn max3(a: int, b: int, c: int) -> int;
+    fn clamp(val: int, min_val: int, max_val: int) -> int;
+    fn lerp(a: int, b: int, t_percent: int) -> int;
+    fn map_range(val: int, in_min: int, in_max: int, out_min: int, out_max: int) -> int;
+
+    fn pow(base: int, exp: int) -> int;
+    fn sqrt(x: int) -> int;
+    fn cbrt(x: int) -> int;
+    fn hypot(a: int, b: int) -> int;
+    fn log2(x: int) -> int;
+    fn log10(x: int) -> int;
+    fn is_power_of_two(x: int) -> int;
+    fn next_power_of_two(x: int) -> int;
+
+    fn gcd(a: int, b: int) -> int;
+    fn lcm(a: int, b: int) -> int;
+    fn is_even(x: int) -> int;
+    fn is_odd(x: int) -> int;
+    fn is_prime(n: int) -> int;
+    fn next_prime(n: int) -> int;
+    fn factorial(n: int) -> int;
+    fn combinations(n: int, k: int) -> int;
+    fn permutations(n: int, k: int) -> int;
+    fn fibonacci(n: int) -> int;
+
+    fn sin_deg(deg: int) -> int;
+    fn cos_deg(deg: int) -> int;
+    fn tan_deg(deg: int) -> int;
+
+    fn distance_2d(x1: int, y1: int, x2: int, y2: int) -> int;
+    fn manhattan_distance(x1: int, y1: int, x2: int, y2: int) -> int;
+    fn area_rectangle(width: int, height: int) -> int;
+    fn perimeter_rectangle(width: int, height: int) -> int;
+    fn area_triangle(base: int, height: int) -> int;
+    fn area_circle_approx(radius: int) -> int;
+
+    fn rand_range(min_val: int, max_val: int) -> int;
+    fn rand_choice(a: int, b: int) -> int;
+    fn rand_bool() -> int;
+}

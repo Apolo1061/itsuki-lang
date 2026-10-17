@@ -1,0 +1,54 @@
+#pragma once
+
+extern "C" {
+    fn printf(fmt: char*, ...) -> int;
+    fn puts(str: char*) -> int;
+    fn putchar(c: int) -> int;
+    fn getchar() -> int;
+    fn sprintf(buffer: char*, fmt: char*, ...) -> int;
+    fn snprintf(buffer: char*, maxlen: int, fmt: char*, ...) -> int;
+
+    // Manejo de archivos en C (FILE* como void*)
+    fn fopen(filename: char*, mode: char*) -> void*;
+    fn fclose(stream: void*) -> int;
+    fn fread(ptr: void*, size: int, count: int, stream: void*) -> int;
+    fn fwrite(ptr: void*, size: int, count: int, stream: void*) -> int;
+    fn fputs(str: char*, stream: void*) -> int;
+    fn fgets(str: char*, num: int, stream: void*) -> char*;
+    fn fseek(stream: void*, offset: int, origin: int) -> int;
+    fn ftell(stream: void*) -> int;
+    fn feof(stream: void*) -> int;
+    fn fflush(stream: void*) -> int;
+    fn remove(filename: char*) -> int;
+    fn rename(oldname: char*, newname: char*) -> int;
+
+    fn system(command: char*) -> int;
+    fn exit(status: int) -> void;
+    fn getenv(name: char*) -> char*;
+    fn rand() -> int;
+    fn srand(seed: int) -> void;
+    fn qsort(base: void*, num: int, size: int, compar: void*) -> void;
+
+    fn malloc(size: int) -> void*;
+    fn calloc(num: int, size: int) -> void*;
+    fn realloc(ptr: void*, new_size: int) -> void*;
+    fn free(ptr: void*) -> void;
+
+    fn strlen(s: char*) -> int;
+    fn strcpy(dest: char*, src: char*) -> char*;
+    fn strncpy(dest: char*, src: char*, n: int) -> char*;
+    fn strcat(dest: char*, src: char*) -> char*;
+    fn strncat(dest: char*, src: char*, n: int) -> char*;
+    fn strcmp(s1: char*, s2: char*) -> int;
+    fn strncmp(s1: char*, s2: char*, n: int) -> int;
+    fn strchr(s: char*, c: int) -> char*;
+    fn strstr(haystack: char*, needle: char*) -> char*;
+
+    fn memset(dest: void*, val: int, count: int) -> void*;
+    fn memcpy(dest: void*, src: void*, count: int) -> void*;
+    fn memmove(dest: void*, src: void*, count: int) -> void*;
+    fn memcmp(s1: void*, s2: void*, count: int) -> int;
+
+    fn time(timer: void*) -> int;
+    fn clock() -> int;
+}
