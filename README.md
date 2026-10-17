@@ -70,7 +70,7 @@ bash install.sh
 Crea un archivo llamado `hola.suki`:
 
 ```itsuki
-#include <fundamental.suki>
+#include <fundamental.huki>
 
 fn main() -> void {
     printf("¡Hola, Mundo desde Itsuki!\n");
@@ -114,7 +114,7 @@ itsuki uninstall libreria
 
 ### Usar la librería en tu código
 ```itsuki
-#include <fundamental.suki>
+#include <fundamental.huki>
 #include <libreria.huki>     // Se importa automáticamente desde ~/.itsuki/packages/
 
 fn main() -> void {
@@ -183,7 +183,7 @@ Puedes llamar funciones de C declarándolas con `extern` y pasando los archivos 
 
 ```itsuki
 // main.suki
-#include <fundamental.suki>
+#include <fundamental.huki>
 
 extern fn funcion_en_c(a: int, b: int) -> int;
 
@@ -204,6 +204,7 @@ itsuki run main.suki codigo_c.c
 
 ```text
 itsuki/
+├── examble/               # Ejemplos listos para compilar de las librerías
 ├── img/                   # Logotipo oficial del lenguaje
 ├── linux/                 # Compilador e instalador nativo para Linux
 │   ├── headers/           # Cabeceras C (.h)

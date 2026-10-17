@@ -891,6 +891,12 @@ int main(int argc, char* argv[]) {
 
     if (build_ret != 0) {
         printf("[Itsuki Error] Fallo al compilar y enlazar el ejecutable '%s'\n", target_exe);
+#ifndef _WIN32
+        printf("[Itsuki Ayuda] Si el error anterior menciona 'crt1.o' o bibliotecas incompatibles, instala las librerias multilib (32 bits):\n");
+        printf("               Ubuntu / Linux Mint / Debian: sudo apt update && sudo apt install gcc-multilib libc6-dev-i386\n");
+        printf("               Fedora / RHEL:                sudo dnf install glibc-devel.i686 libgcc.i686\n");
+        printf("               Arch Linux:                   sudo pacman -S lib32-glibc lib32-gcc-libs\n");
+#endif
         return 1;
     }
 

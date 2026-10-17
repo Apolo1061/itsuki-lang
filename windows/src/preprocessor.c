@@ -1019,25 +1019,56 @@ static int try_resolve_file(const char* base_dir, const char* name, int is_syste
             return 1;
         }
 
-        // 3. Buscar en directorio lib/ global del sistema
-        char cand_lib[1024];
-        if (has_ext) {
-            snprintf(cand_lib, sizeof(cand_lib), "lib/%s", name);
-            FILE* test = fopen(cand_lib, "rb");
-            if (test != NULL) {
-                fclose(test);
-                normalize_path(cand_lib, out_path, 512);
-                return 1;
+        // 3. Buscar en directorios lib/ (local, ~/.itsuki/lib, exe_dir/lib, exe_dir/../lib)
+        char cand_lib[2048];
+        char base_search_dirs[4][512];
+        int search_dir_count = 0;
+        
+        strcpy(base_search_dirs[search_dir_count++], "lib");
+        
+#ifdef _WIN32
+        const char* u_home = getenv("USERPROFILE");
+        if (!u_home) u_home = getenv("APPDATA");
+        if (u_home) {
+            snprintf(base_search_dirs[search_dir_count++], 512, "%s\\.itsuki\\lib", u_home);
+        }
+        char exe_p[512] = {0};
+        extern unsigned long __stdcall GetModuleFileNameA(void* hModule, char* lpFilename, unsigned long nSize);
+        if (GetModuleFileNameA(NULL, exe_p, sizeof(exe_p)) > 0) {
+            char* ls = strrchr(exe_p, '\\');
+            if (!ls) ls = strrchr(exe_p, '/');
+            if (ls) {
+                *ls = '\0';
+                snprintf(base_search_dirs[search_dir_count++], 512, "%s\\lib", exe_p);
+                snprintf(base_search_dirs[search_dir_count++], 512, "%s\\..\\lib", exe_p);
             }
-        } else {
-            const char* lib_exts[] = {".huki", ".suki", ".hu", ".su", NULL};
-            for (int e = 0; lib_exts[e] != NULL; e++) {
-                snprintf(cand_lib, sizeof(cand_lib), "lib/%s%s", name, lib_exts[e]);
+        }
+#else
+        const char* u_home = getenv("HOME");
+        if (u_home) {
+            snprintf(base_search_dirs[search_dir_count++], 512, "%s/.itsuki/lib", u_home);
+        }
+#endif
+
+        for (int d = 0; d < search_dir_count; d++) {
+            if (has_ext) {
+                snprintf(cand_lib, sizeof(cand_lib), "%s/%s", base_search_dirs[d], name);
                 FILE* test = fopen(cand_lib, "rb");
                 if (test != NULL) {
                     fclose(test);
                     normalize_path(cand_lib, out_path, 512);
                     return 1;
+                }
+            } else {
+                const char* lib_exts[] = {".huki", ".suki", ".hu", ".su", NULL};
+                for (int e = 0; lib_exts[e] != NULL; e++) {
+                    snprintf(cand_lib, sizeof(cand_lib), "%s/%s%s", base_search_dirs[d], name, lib_exts[e]);
+                    FILE* test = fopen(cand_lib, "rb");
+                    if (test != NULL) {
+                        fclose(test);
+                        normalize_path(cand_lib, out_path, 512);
+                        return 1;
+                    }
                 }
             }
         }
@@ -1514,10 +1545,13 @@ static void preprocess_internal(const char* source, const char* filepath, Buffer
                                 if (cf) {
                                     fclose(cf);
                                     add_discovered_source(comp_path);
-                                } else if (strncmp(comp_path, "embedded:", 9) == 0 || has_embedded_file(comp_path)) {
-                                    char emb_comp[512];
-                                    snprintf(emb_comp, sizeof(emb_comp), "embedded:%s", comp_path + (strncmp(comp_path, "embedded:", 9) == 0 ? 9 : 0));
-                                    add_discovered_source(emb_comp);
+                                } else {
+                                    const char* emb_name = comp_path + (strncmp(comp_path, "embedded:", 9) == 0 ? 9 : 0);
+                                    if (has_embedded_file(emb_name)) {
+                                        char emb_comp[512];
+                                        snprintf(emb_comp, sizeof(emb_comp), "embedded:%s", emb_name);
+                                        add_discovered_source(emb_comp);
+                                    }
                                 }
                             }
                         }

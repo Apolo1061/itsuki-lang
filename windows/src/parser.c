@@ -1051,10 +1051,13 @@ ASTNode* parser_parse_import(Parser* parser) {
                 if (cf) {
                     fclose(cf);
                     add_discovered_source(comp_path);
-                } else if (strncmp(comp_path, "embedded:", 9) == 0 || has_embedded_file(comp_path)) {
-                    char emb_comp[512];
-                    snprintf(emb_comp, sizeof(emb_comp), "embedded:%s", comp_path + (strncmp(comp_path, "embedded:", 9) == 0 ? 9 : 0));
-                    add_discovered_source(emb_comp);
+                } else {
+                    const char* emb_name = comp_path + (strncmp(comp_path, "embedded:", 9) == 0 ? 9 : 0);
+                    if (has_embedded_file(emb_name)) {
+                        char emb_comp[512];
+                        snprintf(emb_comp, sizeof(emb_comp), "embedded:%s", emb_name);
+                        add_discovered_source(emb_comp);
+                    }
                 }
             }
         }
@@ -1083,12 +1086,21 @@ ASTNode* parser_parse_import(Parser* parser) {
 ASTNode* parser_parse_using(Parser* parser) {
     int line = parser->current_token->line;
     parser_eat(parser, TOKEN_USING);
-    parser_eat(parser, TOKEN_NAMESPACE);
-    char* ns_name = parser_parse_scoped_identifier(parser);
+    int is_ns = 0;
+    if (parser->current_token->type == TOKEN_NAMESPACE) {
+        parser_eat(parser, TOKEN_NAMESPACE);
+        is_ns = 1;
+    }
+    char* target = parser_parse_scoped_identifier(parser);
     parser_eat(parser, TOKEN_SEMICOLON);
     
+    if (!is_ns && strstr(target, "::") == NULL && is_known_namespace(target)) {
+        is_ns = 1;
+    }
+    
     ASTNode* node = create_ast_node(AST_USING, line);
-    node->name = ns_name;
+    node->name = target;
+    node->int_value = is_ns;
     return node;
 }
 
@@ -1096,6 +1108,21 @@ ASTNode* parser_parse_namespace(Parser* parser) {
     int line = parser->current_token->line;
     parser_eat(parser, TOKEN_NAMESPACE);
     char* ns_name = parser_parse_scoped_identifier(parser);
+    
+    // Soporte para alias de namespace: namespace alias = Objetivo;
+    if (parser->current_token->type == TOKEN_ASSIGN) {
+        parser_eat(parser, TOKEN_ASSIGN);
+        char* target_ns = parser_parse_scoped_identifier(parser);
+        parser_eat(parser, TOKEN_SEMICOLON);
+        add_known_namespace(ns_name);
+        
+        ASTNode* node = create_ast_node(AST_NAMESPACE, line);
+        node->name = ns_name;
+        node->type_name = target_ns;
+        node->int_value = 1;
+        return node;
+    }
+    
     add_known_namespace(ns_name);
     
     char* prev_ns = parser->current_namespace;
@@ -2028,6 +2055,40 @@ static ASTNode* parser_parse_primary(Parser* parser) {
         }
 
         char* name = parser_parse_scoped_identifier(parser);
+        if (parser->current_token->type == TOKEN_LANGLE) {
+            const char* short_name = name;
+            const char* p = name;
+            const char* last_c = NULL;
+            while ((p = strstr(p, "::")) != NULL) {
+                last_c = p;
+                p += 2;
+            }
+            if (last_c != NULL) short_name = last_c + 2;
+            
+            TemplateDef* tpl2 = find_template(name);
+            if (!tpl2) tpl2 = find_template(short_name);
+            if (tpl2 != NULL) {
+                char* tpl_name = strdup(tpl2->name);
+                parser_eat(parser, TOKEN_LANGLE);
+                char* type_args[8];
+                int arg_count = 0;
+                while (parser->current_token->type != TOKEN_RANGLE && parser->current_token->type != TOKEN_EOF) {
+                    type_args[arg_count++] = parser_parse_type(parser);
+                    if (parser->current_token->type == TOKEN_COMMA) {
+                        parser_eat(parser, TOKEN_COMMA);
+                    }
+                }
+                parser_eat(parser, TOKEN_RANGLE);
+                char* spec_name = instantiate_template(tpl_name, type_args, arg_count);
+                for (int i = 0; i < arg_count; i++) free(type_args[i]);
+                free(tpl_name);
+                free(name);
+
+                ASTNode* node = create_ast_node(AST_IDENTIFIER, line);
+                node->name = spec_name;
+                return node;
+            }
+        }
         ASTNode* node;
         if (strstr(name, "::") != NULL) {
             node = create_ast_node(AST_SCOPED_IDENTIFIER, line);
@@ -2712,6 +2773,12 @@ static ASTNode* parser_parse_statement(Parser* parser) {
     if (parser->current_token->type == TOKEN_SEMICOLON) {
         parser_eat(parser, TOKEN_SEMICOLON);
         return NULL;
+    }
+    if (parser->current_token->type == TOKEN_USING) {
+        return parser_parse_using(parser);
+    }
+    if (parser->current_token->type == TOKEN_NAMESPACE) {
+        return parser_parse_namespace(parser);
     }
     if (parser->current_token->type == TOKEN_ASM || parser->current_token->type == TOKEN_C_CODE) {
         return parser_parse_asm_or_c(parser);

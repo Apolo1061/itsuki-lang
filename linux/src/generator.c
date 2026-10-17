@@ -62,6 +62,140 @@ typedef struct UsingNS {
     struct UsingNS* next;
 } UsingNS;
 
+typedef struct NamespaceAlias {
+    char* alias;
+    char* target;
+    struct NamespaceAlias* next;
+} NamespaceAlias;
+
+typedef struct UsingSymbol {
+    char* symbol_name;
+    char* namespace_name;
+    char* full_scoped_name;
+    struct UsingSymbol* next;
+} UsingSymbol;
+
+static UsingNS* active_usings = NULL;
+static NamespaceAlias* active_namespace_aliases = NULL;
+static UsingSymbol* active_using_symbols = NULL;
+
+static void register_namespace_alias(const char* alias, const char* target) {
+    if (!alias || !target) return;
+    NamespaceAlias* curr = active_namespace_aliases;
+    while (curr != NULL) {
+        if (strcmp(curr->alias, alias) == 0) {
+            free(curr->target);
+            curr->target = strdup(target);
+            return;
+        }
+        curr = curr->next;
+    }
+    NamespaceAlias* na = malloc(sizeof(NamespaceAlias));
+    na->alias = strdup(alias);
+    na->target = strdup(target);
+    na->next = active_namespace_aliases;
+    active_namespace_aliases = na;
+}
+
+static const char* resolve_namespace_alias(const char* name) {
+    if (!name) return NULL;
+    NamespaceAlias* curr = active_namespace_aliases;
+    while (curr != NULL) {
+        if (strcmp(curr->alias, name) == 0) {
+            return resolve_namespace_alias(curr->target);
+        }
+        curr = curr->next;
+    }
+    return name;
+}
+
+static char* resolve_scoped_namespace_aliases(const char* scoped_name) {
+    if (!scoped_name) return NULL;
+    const char* colons = strstr(scoped_name, "::");
+    if (!colons) {
+        const char* res = resolve_namespace_alias(scoped_name);
+        return strdup(res ? res : scoped_name);
+    }
+    int prefix_len = colons - scoped_name;
+    char prefix[256];
+    if (prefix_len >= 250) prefix_len = 250;
+    strncpy(prefix, scoped_name, prefix_len);
+    prefix[prefix_len] = '\0';
+    
+    const char* resolved_prefix = resolve_namespace_alias(prefix);
+    const char* rest = colons + 2;
+    
+    char* buf = malloc(strlen(resolved_prefix) + 2 + strlen(rest) + 1);
+    sprintf(buf, "%s::%s", resolved_prefix, rest);
+    return buf;
+}
+
+static void register_using_namespace(const char* ns) {
+    if (!ns) return;
+    const char* real_ns = resolve_namespace_alias(ns);
+    UsingNS* curr = active_usings;
+    while (curr != NULL) {
+        if (strcmp(curr->name, real_ns) == 0) return;
+        curr = curr->next;
+    }
+    UsingNS* uns = malloc(sizeof(UsingNS));
+    uns->name = strdup(real_ns);
+    uns->next = active_usings;
+    active_usings = uns;
+}
+
+static void register_using_symbol(const char* scoped_target) {
+    if (!scoped_target) return;
+    char* resolved = resolve_scoped_namespace_aliases(scoped_target);
+    const char* last_colon = NULL;
+    const char* p = resolved;
+    while ((p = strstr(p, "::")) != NULL) {
+        last_colon = p;
+        p += 2;
+    }
+    if (!last_colon) {
+        register_using_namespace(resolved);
+        free(resolved);
+        return;
+    }
+    int ns_len = last_colon - resolved;
+    char ns_buf[256];
+    if (ns_len >= 250) ns_len = 250;
+    strncpy(ns_buf, resolved, ns_len);
+    ns_buf[ns_len] = '\0';
+    const char* sym = last_colon + 2;
+    
+    UsingSymbol* curr = active_using_symbols;
+    while (curr != NULL) {
+        if (strcmp(curr->symbol_name, sym) == 0 && strcmp(curr->namespace_name, ns_buf) == 0) {
+            free(resolved);
+            return;
+        }
+        curr = curr->next;
+    }
+    
+    UsingSymbol* us = malloc(sizeof(UsingSymbol));
+    us->symbol_name = strdup(sym);
+    us->namespace_name = strdup(ns_buf);
+    us->full_scoped_name = strdup(resolved);
+    us->next = active_using_symbols;
+    active_using_symbols = us;
+    
+    free(resolved);
+}
+
+static UsingSymbol* find_using_symbol(const char* name) {
+    if (!name) return NULL;
+    UsingSymbol* curr = active_using_symbols;
+    while (curr != NULL) {
+        if (strcmp(curr->symbol_name, name) == 0) {
+            return curr;
+        }
+        curr = curr->next;
+    }
+    return NULL;
+}
+
 typedef struct DeclaredFunc {
     char* name;
     char* namespace_prefix;
@@ -404,11 +538,11 @@ typedef struct StructDef {
 
 static StructDef* find_struct_def(const char* type_name);
 static void register_declared_functions(ASTNode* decl);
+static void generate_declarations(ASTNode* decl, FILE* out);
 
 static StringLiteral string_table[MAX_STRING_LITERALS];
 static int string_count = 0;
 static Symbol* current_symbols = NULL;
-static UsingNS* active_usings = NULL;
 static DeclaredFunc* declared_functions = NULL;
 static StructDef* declared_structs = NULL;
 static const char* current_func_namespace = NULL;
@@ -536,7 +670,10 @@ static StructDef* find_struct_def(const char* type_name) {
     else if (strncmp(type_name, "union ", 6) == 0) type_name += 6;
     else if (strncmp(type_name, "class ", 6) == 0) type_name += 6;
     
-    const char* resolved = resolve_typedef(type_name);
+    char* aliased_type = resolve_scoped_namespace_aliases(type_name);
+    const char* eff_type = aliased_type ? aliased_type : type_name;
+    
+    const char* resolved = resolve_typedef(eff_type);
     if (resolved != NULL) {
         if (strncmp(resolved, "const ", 6) == 0) resolved += 6;
         if (strncmp(resolved, "struct ", 7) == 0) resolved += 7;
@@ -546,19 +683,32 @@ static StructDef* find_struct_def(const char* type_name) {
     
     StructDef* curr = declared_structs;
     while (curr != NULL) {
-        if (strcmp(curr->full_name, type_name) == 0 || strcmp(curr->name, type_name) == 0 ||
+        if (strcmp(curr->full_name, eff_type) == 0 || strcmp(curr->name, eff_type) == 0 ||
             (resolved && (strcmp(curr->full_name, resolved) == 0 || strcmp(curr->name, resolved) == 0))) {
+            if (aliased_type) free(aliased_type);
             return curr;
         }
         curr = curr->next;
     }
-    if (strstr(type_name, "::") == NULL) {
+    if (strstr(eff_type, "::") == NULL) {
         if (current_func_namespace != NULL) {
             char qualified[256];
-            sprintf(qualified, "%s::%s", current_func_namespace, type_name);
+            sprintf(qualified, "%s::%s", current_func_namespace, eff_type);
             curr = declared_structs;
             while (curr != NULL) {
                 if (strcmp(curr->full_name, qualified) == 0) {
+                    if (aliased_type) free(aliased_type);
+                    return curr;
+                }
+                curr = curr->next;
+            }
+        }
+        UsingSymbol* us = find_using_symbol(eff_type);
+        if (us != NULL) {
+            curr = declared_structs;
+            while (curr != NULL) {
+                if (strcmp(curr->full_name, us->full_scoped_name) == 0) {
+                    if (aliased_type) free(aliased_type);
                     return curr;
                 }
                 curr = curr->next;
@@ -567,11 +717,12 @@ static StructDef* find_struct_def(const char* type_name) {
         UsingNS* u = active_usings;
         while (u != NULL) {
             char qualified[256];
-            sprintf(qualified, "%s::%s", u->name, type_name);
+            sprintf(qualified, "%s::%s", u->name, eff_type);
             curr = declared_structs;
             while (curr != NULL) {
                 if (strcmp(curr->full_name, qualified) == 0 ||
                     (resolved && strcmp(curr->name, resolved) == 0)) {
+                    if (aliased_type) free(aliased_type);
                     return curr;
                 }
                 curr = curr->next;
@@ -579,6 +730,7 @@ static StructDef* find_struct_def(const char* type_name) {
             u = u->next;
         }
     }
+    if (aliased_type) free(aliased_type);
     return NULL;
 }
 
@@ -760,22 +912,37 @@ static void register_declared_variables(ASTNode* decl) {
 
 static GlobalVar* find_global_var(const char* name) {
     if (name == NULL) return NULL;
+    char* aliased = resolve_scoped_namespace_aliases(name);
+    const char* check_name = aliased ? aliased : name;
     
     GlobalVar* curr = declared_globals;
     while (curr != NULL) {
-        if (strcmp(curr->full_name, name) == 0 || strcmp(curr->name, name) == 0) {
+        if (strcmp(curr->full_name, check_name) == 0 || strcmp(curr->name, check_name) == 0) {
+            if (aliased) free(aliased);
             return curr;
         }
         curr = curr->next;
     }
     
-    if (strstr(name, "::") == NULL) {
+    if (strstr(check_name, "::") == NULL) {
         if (current_func_namespace != NULL) {
             char qualified[256];
-            sprintf(qualified, "%s::%s", current_func_namespace, name);
+            sprintf(qualified, "%s::%s", current_func_namespace, check_name);
             curr = declared_globals;
             while (curr != NULL) {
                 if (strcmp(curr->full_name, qualified) == 0) {
+                    if (aliased) free(aliased);
+                    return curr;
+                }
+                curr = curr->next;
+            }
+        }
+        UsingSymbol* us = find_using_symbol(check_name);
+        if (us != NULL) {
+            curr = declared_globals;
+            while (curr != NULL) {
+                if (strcmp(curr->full_name, us->full_scoped_name) == 0) {
+                    if (aliased) free(aliased);
                     return curr;
                 }
                 curr = curr->next;
@@ -784,10 +951,11 @@ static GlobalVar* find_global_var(const char* name) {
         UsingNS* u = active_usings;
         while (u != NULL) {
             char qualified[256];
-            sprintf(qualified, "%s::%s", u->name, name);
+            sprintf(qualified, "%s::%s", u->name, check_name);
             curr = declared_globals;
             while (curr != NULL) {
                 if (strcmp(curr->full_name, qualified) == 0) {
+                    if (aliased) free(aliased);
                     return curr;
                 }
                 curr = curr->next;
@@ -795,6 +963,7 @@ static GlobalVar* find_global_var(const char* name) {
             u = u->next;
         }
     }
+    if (aliased) free(aliased);
     return NULL;
 }
 
@@ -1130,13 +1299,19 @@ static int current_inline_base_slot = -1;
 static DeclaredFunc* find_declared_func(const char* target_func) {
     if (target_func == NULL) return NULL;
     
-    // Si tiene '::', separar namespace y nombre de función
+    // Si tiene '::', separar namespace y nombre de función (resolviendo alias)
     if (strstr(target_func, "::") != NULL) {
+        char* resolved_call = resolve_scoped_namespace_aliases(target_func);
+        const char* last_colon = NULL;
+        const char* p = resolved_call;
+        while ((p = strstr(p, "::")) != NULL) {
+            last_colon = p;
+            p += 2;
+        }
+        int ns_len = last_colon - resolved_call;
         char ns_buf[256];
-        const char* last_colon = strstr(target_func, "::");
-        int ns_len = last_colon - target_func;
         if (ns_len >= 250) ns_len = 250;
-        strncpy(ns_buf, target_func, ns_len);
+        strncpy(ns_buf, resolved_call, ns_len);
         ns_buf[ns_len] = '\0';
         const char* fname = last_colon + 2;
         
@@ -1144,10 +1319,12 @@ static DeclaredFunc* find_declared_func(const char* target_func) {
         while (df != NULL) {
             if (df->name && strcmp(df->name, fname) == 0 &&
                 df->namespace_prefix && strcmp(df->namespace_prefix, ns_buf) == 0) {
+                free(resolved_call);
                 return df;
             }
             df = df->next;
         }
+        free(resolved_call);
         return NULL;
     }
     
@@ -1163,7 +1340,20 @@ static DeclaredFunc* find_declared_func(const char* target_func) {
         }
     }
     
-    // 2. Revisar si existe global
+    // 2. Revisar si existe un 'using' explícito para este símbolo (ej. using geometria::sumar)
+    UsingSymbol* us = find_using_symbol(target_func);
+    if (us != NULL) {
+        DeclaredFunc* df = declared_functions;
+        while (df != NULL) {
+            if (strcmp(df->name, us->symbol_name) == 0 && df->namespace_prefix != NULL &&
+                strcmp(df->namespace_prefix, us->namespace_name) == 0) {
+                return df;
+            }
+            df = df->next;
+        }
+    }
+    
+    // 3. Revisar si existe global
     DeclaredFunc* df = declared_functions;
     while (df != NULL) {
         if (strcmp(df->name, target_func) == 0 && df->namespace_prefix == NULL) {
@@ -1172,7 +1362,7 @@ static DeclaredFunc* find_declared_func(const char* target_func) {
         df = df->next;
     }
     
-    // 3. Revisar en los namespaces con 'using'
+    // 4. Revisar en los namespaces con 'using'
     UsingNS* u = active_usings;
     while (u != NULL) {
         df = declared_functions;
@@ -1810,14 +2000,20 @@ static void generate_call(ASTNode* node, FILE* out) {
 #endif
         }
     } else {
+        char* resolved_tf = resolve_scoped_namespace_aliases(target_func);
+        UsingSymbol* us = find_using_symbol(resolved_tf);
+        if (us != NULL) {
+            free(resolved_tf);
+            resolved_tf = strdup(us->full_scoped_name);
+        }
         char mangled[256];
         int m_idx = 0;
-        for (int i = 0; target_func[i] != '\0' && m_idx < 250; i++) {
-            if (target_func[i] == ':' && target_func[i+1] == ':') {
+        for (int i = 0; resolved_tf[i] != '\0' && m_idx < 250; i++) {
+            if (resolved_tf[i] == ':' && resolved_tf[i+1] == ':') {
                 mangled[m_idx++] = '_';
                 i++;
             } else {
-                mangled[m_idx++] = target_func[i];
+                mangled[m_idx++] = resolved_tf[i];
             }
         }
         mangled[m_idx] = '\0';
@@ -1826,6 +2022,7 @@ static void generate_call(ASTNode* node, FILE* out) {
 #else
         sprintf(asm_call_name, "_%s", mangled);
 #endif
+        free(resolved_tf);
     }
     
     fprintf(out, "    call %s\n", asm_call_name);
@@ -3786,6 +3983,24 @@ static void generate_statement(ASTNode* node, FILE* out) {
             }
             break;
             
+        case AST_USING: {
+            if (node->int_value == 1) {
+                register_using_namespace(node->name);
+            } else {
+                register_using_symbol(node->name);
+            }
+            break;
+        }
+
+        case AST_NAMESPACE: {
+            if (node->int_value == 1) {
+                register_namespace_alias(node->name, node->type_name);
+            } else {
+                generate_declarations(node->children, out);
+            }
+            break;
+        }
+
         default:
             break;
     }
@@ -3874,11 +4089,58 @@ static void scan_local_variables(ASTNode* node, int* current_offset) {
     }
 }
 
+static void register_function_local_usings_and_aliases(ASTNode* node) {
+    while (node != NULL) {
+        if (node->type == AST_USING) {
+            if (node->int_value == 1) {
+                register_using_namespace(node->name);
+            } else {
+                register_using_symbol(node->name);
+            }
+        } else if (node->type == AST_NAMESPACE && node->int_value == 1) {
+            register_namespace_alias(node->name, node->type_name);
+        } else if (node->type == AST_BLOCK) {
+            register_function_local_usings_and_aliases(node->statements);
+        } else if (node->type == AST_IF) {
+            register_function_local_usings_and_aliases(node->body);
+            if (node->else_branch) register_function_local_usings_and_aliases(node->else_branch);
+        } else if (node->type == AST_WHILE || node->type == AST_FOR || node->type == AST_DO_WHILE) {
+            register_function_local_usings_and_aliases(node->body);
+        }
+        node = node->next;
+    }
+}
+
+static void register_all_namespace_aliases(ASTNode* decl) {
+    while (decl != NULL) {
+        if (decl->type == AST_NAMESPACE) {
+            if (decl->int_value == 1) {
+                register_namespace_alias(decl->name, decl->type_name);
+            } else {
+                register_all_namespace_aliases(decl->children);
+            }
+        } else if (decl->type == AST_IMPORT) {
+            if (decl->children != NULL) {
+                register_all_namespace_aliases(decl->children);
+            }
+        }
+        decl = decl->next;
+    }
+}
+
 static void generate_function(ASTNode* node, FILE* out) {
     if (node->body == NULL) return; // Prototipo o función externa en runtime
     current_func_namespace = node->namespace_prefix;
     current_func_name = node->name;
     free_symbols();
+    
+    UsingNS* saved_active_usings = active_usings;
+    UsingSymbol* saved_active_using_symbols = active_using_symbols;
+    NamespaceAlias* saved_active_namespace_aliases = active_namespace_aliases;
+    
+    if (node->body != NULL) {
+        register_function_local_usings_and_aliases(node->body);
+    }
     
     // Determinar nombre ensamblador (con namespace mangling)
     char mangled_name[512];
@@ -3993,6 +4255,9 @@ static void generate_function(ASTNode* node, FILE* out) {
         fprintf(out, "    popl %%ebp\n");
         fprintf(out, "    ret\n");
     }
+    active_usings = saved_active_usings;
+    active_using_symbols = saved_active_using_symbols;
+    active_namespace_aliases = saved_active_namespace_aliases;
     current_func_namespace = NULL;
     current_func_name = NULL;
 }
@@ -4000,10 +4265,11 @@ static void generate_function(ASTNode* node, FILE* out) {
 static void generate_declarations(ASTNode* decl, FILE* out) {
     while (decl != NULL) {
         if (decl->type == AST_USING) {
-            UsingNS* uns = malloc(sizeof(UsingNS));
-            uns->name = strdup(decl->name);
-            uns->next = active_usings;
-            active_usings = uns;
+            if (decl->int_value == 1) {
+                register_using_namespace(decl->name);
+            } else {
+                register_using_symbol(decl->name);
+            }
         } else if (decl->type == AST_CLASS) {
             ASTNode* m = decl->body;
             while (m != NULL) {
@@ -4019,7 +4285,11 @@ static void generate_declarations(ASTNode* decl, FILE* out) {
                 generate_function(decl, out);
             }
         } else if (decl->type == AST_NAMESPACE) {
-            generate_declarations(decl->children, out);
+            if (decl->int_value == 1) {
+                register_namespace_alias(decl->name, decl->type_name);
+            } else {
+                generate_declarations(decl->children, out);
+            }
         } else if (decl->type == AST_IMPORT) {
             if (decl->children != NULL) {
                 generate_declarations(decl->children, out);
@@ -4062,13 +4332,18 @@ void generate_code(ASTNode* node, const char* output_filename) {
     while (declared_globals) { GlobalVar* n = declared_globals->next; free(declared_globals->name); free(declared_globals); declared_globals = n; }
     while (declared_static_locals) { StaticLocalVar* n = declared_static_locals->next; free(declared_static_locals); declared_static_locals = n; }
     while (active_usings) { UsingNS* n = active_usings->next; free(active_usings->name); free(active_usings); active_usings = n; }
+    while (active_namespace_aliases) { NamespaceAlias* n = active_namespace_aliases->next; free(active_namespace_aliases->alias); free(active_namespace_aliases->target); free(active_namespace_aliases); active_namespace_aliases = n; }
+    while (active_using_symbols) { UsingSymbol* n = active_using_symbols->next; free(active_using_symbols->symbol_name); free(active_using_symbols->namespace_name); free(active_using_symbols->full_scoped_name); free(active_using_symbols); active_using_symbols = n; }
     declared_structs = NULL;
     declared_functions = NULL;
     declared_globals = NULL;
     declared_static_locals = NULL;
     static_local_counter = 0;
     active_usings = NULL;
+    active_namespace_aliases = NULL;
+    active_using_symbols = NULL;
     if (node->type == AST_PROGRAM) {
+        register_all_namespace_aliases(node->children);
         register_declared_structs(node->children);
         register_declared_functions(node->children);
         register_declared_variables(node->children);

@@ -1,6 +1,8 @@
+# ===========================================================
+# Itsuki Programming Language - .gitignore
+# ===========================================================
 
-# gitignore
-
+# Archivos objeto y temporales de compilacion
 *.o
 *.obj
 *.tmp
@@ -8,12 +10,14 @@
 *.out
 *.exe.stackdump
 
+# Archivos de ensamblador generados temporalmente (no runtime.s)
 *.s
 !lib/runtime.s
 !windows/lib/runtime.s
 !linux/lib/runtime.s
 !build/**/runtime.s
 
+# Binarios temporales de prueba locales
 linux/build/
 windows/build/
 cosas.exe
@@ -22,10 +26,12 @@ compilador.exe
 test_master_suite
 Mensaje
 
+# Archivos de depuración y enlaces temporales
 *.pdb
 *.ilk
 *.idb
 
+# Configuraciones de editores y sistemas operativos
 .vscode/
 .idea/
 *.swp

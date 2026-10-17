@@ -139,6 +139,24 @@ echo ""
 echo -e "${YELLOW}[5/5] Comprobando dependencias:${NC}"
 if command -v gcc >/dev/null 2>&1; then
     echo -e "      ${GREEN}[OK] GCC detectado: $(command -v gcc)${NC}"
+    # Verificar si tiene soporte multilib de 32 bits (-m32)
+    if echo "int main(void){return 0;}" | gcc -m32 -x c - -o /dev/null >/dev/null 2>&1; then
+        echo -e "      ${GREEN}[OK] Soporte de 32 bits (multilib) verificado correctamente.${NC}"
+    else
+        echo -e "      ${YELLOW}[AVISO] Tu sistema de 64 bits requiere librerias de enlace (multilib).${NC}"
+        if command -v apt-get >/dev/null 2>&1; then
+            echo -e "      ${CYAN}Se instalara 'gcc-multilib' y 'libc6-dev-i386' para soporte completo:${NC}"
+            if [ "$EUID" -eq 0 ]; then
+                apt-get update -qq && apt-get install -y -qq gcc-multilib libc6-dev-i386
+                echo -e "      ${GREEN}[OK] Soporte multilib instalado exitosamente.${NC}"
+            else
+                echo -e "      ${YELLOW}Ejecuta: sudo apt update && sudo apt install gcc-multilib libc6-dev-i386${NC}"
+            fi
+        else
+            echo -e "      ${CYAN}En Fedora: sudo dnf install glibc-devel.i686 libgcc.i686${NC}"
+            echo -e "      ${CYAN}En Arch:   sudo pacman -S lib32-glibc lib32-gcc-libs${NC}"
+        fi
+    fi
 else
     echo -e "      ${RED}[ADVERTENCIA] GCC no encontrado. Instala gcc con tu gestor (ej: apt install gcc gcc-multilib)${NC}"
 fi

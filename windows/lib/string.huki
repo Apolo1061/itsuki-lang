@@ -1,6 +1,6 @@
 #pragma once
 
-#include <fundamental.suki>
+#include <fundamental.huki>
 
 struct String {
     char* buffer;
