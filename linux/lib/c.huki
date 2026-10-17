@@ -25,6 +25,9 @@ extern "C" {
     fn system(command: char*) -> int;
     fn exit(status: int) -> void;
     fn getenv(name: char*) -> char*;
+    fn atoi(str: char*) -> int;
+    fn atol(str: char*) -> int;
+    fn abs(n: int) -> int;
     fn rand() -> int;
     fn srand(seed: int) -> void;
     fn qsort(base: void*, num: int, size: int, compar: void*) -> void;

@@ -7,6 +7,7 @@
 #include "preprocessor.h"
 #include "embedded_lib.h"
 #include "package_manager.h"
+#include "arch_config.h"
 
 #ifdef _WIN32
 __declspec(dllimport) unsigned long __stdcall GetModuleFileNameA(void* hModule, char* lpFilename, unsigned long nSize);
@@ -390,7 +391,9 @@ static char* load_and_preprocess_file(const char* filepath) {
 #endif
 
 static void print_banner(void) {
-    printf("  Itsuki Programming Language - Compiler v%s\n", ITSUKI_VERSION);
+    const ArchConfig* arch = arch_get_current();
+    printf("  Itsuki Programming Language - Compiler v%s [%s %d-bit -> Target x86_32]\n",
+           ITSUKI_VERSION, arch->host_arch, arch->os_bits);
 }
 
 static void print_help(const char* prog_name) {
@@ -406,6 +409,8 @@ static void print_help(const char* prog_name) {
     printf("  install   <url-git|usuario/repo>  Instala una libreria desde GitHub en el sistema (~/.itsuki/packages)\n");
     printf("  uninstall <nombre-libreria>       Desinstala una libreria instalada en el sistema\n");
     printf("  list                              Lista todas las librerias instaladas en el sistema\n\n");
+    printf("Comandos de Diagnostico y Arquitectura:\n");
+    printf("  doctor, info                Analiza y muestra la arquitectura de la PC, GCC y compatibilidad\n\n");
     printf("Opciones:\n");
     printf("  -E                          Ejecuta solo el preprocesador (equivalente al comando 'cpp')\n");
     printf("  -D<macro>[=valor]           Define una macro para el preprocesador\n");
@@ -414,6 +419,7 @@ static void print_help(const char* prog_name) {
     printf("  -I<dir>                     Agrega directorio de busqueda de cabeceras\n");
     printf("  -O0, -O1, -O2, -O3, -Os     Nivel de optimizacion\n");
     printf("  -o <salida>                 Nombre del archivo de salida\n");
+    printf("  --arch                      Muestra el diagnostico de arquitectura de la maquina y GCC\n");
     printf("  -v, --version               Muestra la version del compilador\n");
     printf("  -h, --help                  Muestra esta ayuda\n\n");
 }
@@ -569,13 +575,22 @@ static int resolve_source_file(const char* raw, char* resolved, size_t max_len) 
 }
 
 int main(int argc, char* argv[]) {
+    arch_init();
+
     for (int i = 1; i < argc; i++) {
         if (strcmp(argv[i], "-h") == 0 || strcmp(argv[i], "--help") == 0) {
             print_help(argv[0]);
             return 0;
         }
         if (strcmp(argv[i], "-v") == 0 || strcmp(argv[i], "--version") == 0) {
-            printf("Itsuki Compiler v%s\n", ITSUKI_VERSION);
+            const ArchConfig* arch = arch_get_current();
+            printf("Itsuki Compiler v%s [Host: %s %d-bit, Linker: %s %s]\n",
+                   ITSUKI_VERSION, arch->host_arch, arch->os_bits, arch->gcc_path,
+                   arch->gcc_flags[0] ? arch->gcc_flags : "(standard)");
+            return 0;
+        }
+        if (strcmp(argv[i], "--arch") == 0) {
+            arch_print_diagnostics();
             return 0;
         }
     }
@@ -583,6 +598,12 @@ int main(int argc, char* argv[]) {
     if (argc < 2) {
         printf("itsuki: fatal error: no input files\ncompilation terminated.\n");
         return 1;
+    }
+
+    // Comandos de Diagnostico y Arquitectura
+    if (strcmp(argv[1], "doctor") == 0 || strcmp(argv[1], "info") == 0) {
+        arch_print_diagnostics();
+        return 0;
     }
 
     // Comandos de Gestor de Paquetes
@@ -652,6 +673,10 @@ int main(int argc, char* argv[]) {
                 d_name[127] = '\0';
             }
             preprocessor_define(d_name, d_val);
+        } else if (strcmp(argv[i], "-m32") == 0) {
+            // Aceptado explicitamente para arquitectura x86 32-bit
+        } else if (strcmp(argv[i], "-m64") == 0) {
+            printf("[Itsuki Info] Itsuki genera ejecutables x86 (32 bits), compatibles de forma transparente con sistemas de 64 bits (WOW64 en Windows y multilib en Linux).\n");
         } else if (strncmp(argv[i], "-l", 2) == 0 || strncmp(argv[i], "-L", 2) == 0 || strncmp(argv[i], "-I", 2) == 0) {
             if (linker_flag_count < 64) {
                 strncpy(linker_flags[linker_flag_count], argv[i], 255);
@@ -849,11 +874,15 @@ int main(int argc, char* argv[]) {
     }
 
     char gcc_cmd[4096];
-#ifdef _WIN32
-    int pos = snprintf(gcc_cmd, sizeof(gcc_cmd), "gcc");
-#else
-    int pos = snprintf(gcc_cmd, sizeof(gcc_cmd), "gcc -m32 -no-pie");
-#endif
+    const ArchConfig* arch = arch_get_current();
+    const char* gpath = (arch->gcc_path[0] != '\0') ? arch->gcc_path : "gcc";
+    int pos = 0;
+    if (arch->gcc_flags[0] != '\0') {
+        pos = snprintf(gcc_cmd, sizeof(gcc_cmd), "%s %s", gpath, arch->gcc_flags);
+    } else {
+        pos = snprintf(gcc_cmd, sizeof(gcc_cmd), "%s", gpath);
+    }
+
     for (int i = 0; i < asm_count; i++) {
         pos += snprintf(gcc_cmd + pos, sizeof(gcc_cmd) - pos, " \"%s\"", tmp_asm_files[i]);
     }
@@ -890,13 +919,8 @@ int main(int argc, char* argv[]) {
     }
 
     if (build_ret != 0) {
-        printf("[Itsuki Error] Fallo al compilar y enlazar el ejecutable '%s'\n", target_exe);
-#ifndef _WIN32
-        printf("[Itsuki Ayuda] Si el error anterior menciona 'crt1.o' o bibliotecas incompatibles, instala las librerias multilib (32 bits):\n");
-        printf("               Ubuntu / Linux Mint / Debian: sudo apt update && sudo apt install gcc-multilib libc6-dev-i386\n");
-        printf("               Fedora / RHEL:                sudo dnf install glibc-devel.i686 libgcc.i686\n");
-        printf("               Arch Linux:                   sudo pacman -S lib32-glibc lib32-gcc-libs\n");
-#endif
+        printf("\n[Itsuki Error] Fallo al compilar y enlazar el ejecutable '%s'\n", target_exe);
+        arch_print_linker_troubleshooting();
         return 1;
     }
 

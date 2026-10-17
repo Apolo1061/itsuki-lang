@@ -21,6 +21,8 @@
 ## Características Principales
 
 *  **Generación de Codigo Nativo**: Compila directamente a ensamblador x86 de 32 bits de alto rendimiento.
+*  **Detección Inteligente de Arquitectura**: Antes de instalarse, detecta si la PC es de **64 bits** (x86_64/AMD64) o **32 bits** (x86), verifica el compilador GCC (`-dumpmachine`, soporte multilib) y configura automáticamente los flags idóneos en `arch.conf`.
+*  **Comando de Diagnóstico (`itsuki doctor`)**: Analiza la arquitectura del sistema operativo, el toolchain GCC y el estado multilib en cualquier momento.
 *  **Gestor de Paquetes Integrado**: Instala y actualiza librerías directamente desde GitHub con `itsuki install <url|usuario/repo>`.
 *  **Sistema de Inclusión Diferenciado**:
   * `<libreria.huki>`: Búsqueda estricta en el sistema (`~/.itsuki/packages/`) y librerías integradas.
@@ -59,7 +61,7 @@ Accede a la carpeta `linux` y ejecuta:
 cd linux
 bash install.sh
 ```
-*(O con `sudo bash install.sh` para una instalación en todo el sistema).*
+*(No requiere permisos de superusuario ni `sudo`; se instala 100% en tu espacio de usuario `~/.itsuki/` y añade la ruta a tu `PATH`).*
 
 ---
 
@@ -69,7 +71,7 @@ bash install.sh
 
 Crea un archivo llamado `hola.suki`:
 
-```itsuki
+```c
 #include <fundamental.huki>
 
 fn main() -> void {
@@ -86,6 +88,12 @@ itsuki run hola.suki
 ```bash
 itsuki build hola.suki -o mi_programa
 ```
+
+### Diagnóstico de arquitectura del entorno:
+```bash
+itsuki doctor
+```
+*Muestra la arquitectura de la PC (64 o 32 bits), la versión de GCC en uso, los flags de enlace configurados y el estado del soporte multilib.*
 
 ---
 
@@ -113,7 +121,7 @@ itsuki uninstall libreria
 ```
 
 ### Usar la librería en tu código
-```itsuki
+```c
 #include <fundamental.huki>
 #include <libreria.huki>     // Se importa automáticamente desde ~/.itsuki/packages/
 
@@ -127,7 +135,7 @@ fn main() -> void {
 ## 📖 Sintaxis del Lenguaje
 
 ### Variables y Tipos
-```itsuki
+```c
 var x: int = 10;
 var pi: int = 31416; // Valores en punto fijo o enteros
 var mensaje: char* = "Cadena de texto";
@@ -135,7 +143,7 @@ var activo: int = 1;
 ```
 
 ### Funciones
-```itsuki
+```c
 fn sumar(a: int, b: int) -> int {
     return a + b;
 }
@@ -146,7 +154,7 @@ fn saludar(nombre: char*) -> void {
 ```
 
 ### Estructuras y Punteros
-```itsuki
+```c
 struct Punto {
     var x: int;
     var y: int;
@@ -159,7 +167,7 @@ fn mover(p: Punto*, dx: int, dy: int) -> void {
 ```
 
 ### Clases y Métodos
-```itsuki
+```c
 class Contador {
     var valor: int;
 
@@ -181,7 +189,7 @@ public:
 ### Interoperabilidad con C
 Puedes llamar funciones de C declarándolas con `extern` y pasando los archivos `.c` al compilar:
 
-```itsuki
+```c
 // main.suki
 #include <fundamental.huki>
 
@@ -226,3 +234,33 @@ itsuki/
 ```
 
 ---
+
+##  Contribuidores y Agradecimientos
+
+¡Un enorme agradecimiento a todas las personas que contribuyen y hacen posible el desarrollo y crecimiento de **Itsuki Programming Language**
+
+<p align="center">
+  <a href="https://github.com/Apolo1061/itsuki-lang/graphs/contributors">
+    <img src="https://img.shields.io/github/contributors/Apolo1061/itsuki-lang?style=for-the-badge&logo=github&color=34D058&label=Colaboradores" alt="Número de Colaboradores" />
+  </a>
+</p>
+
+<p align="center">
+  <a href="https://github.com/Apolo1061/itsuki-lang/graphs/contributors">
+    <img src="https://contrib.rocks/image?repo=Apolo1061/itsuki-lang" alt="Colaboradores de Itsuki" />
+  </a>
+</p>
+
+
+
+### 🤝 ¿Quieres contribuir al proyecto?
+¡Toda ayuda es bienvenida! Puedes colaborar de diversas maneras:
+* 🐛 **Reportar fallos o bugs**: Abre un [Issue en GitHub](https://github.com/Apolo1061/itsuki-lang/issues).
+* 💡 **Proponer nuevas características**: Sugerencias de sintaxis, librerías estándar o mejoras en el compilador.
+* 🛠️ **Enviar Pull Requests**: Abre un [Pull Request](https://github.com/Apolo1061/itsuki-lang/pulls) con optimizaciones, correcciones o nuevas bibliotecas.
+
+---
+
+## 📄 Licencia
+
+Este proyecto se distribuye bajo la licencia **MIT**. Para más detalles, consulta el archivo [LICENSE](LICENSE).

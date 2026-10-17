@@ -1,25 +1,86 @@
 #!/usr/bin/env bash
 # ===========================================================
-#        ITSUKI PROGRAMMING LANGUAGE - LINUX INSTALLER
+#        ITSUKI COMPILER - INSTALADOR (LINUX)
+#    100% Espacio de Usuario - Sin requerir 'sudo' o root
 # ===========================================================
-
 set -e
 
-# Colores para la terminal
-RED='\033[0;31m'
+# Colores ANSI
+CYAN='\033[0;36m'
 GREEN='\033[0;32m'
 YELLOW='\033[1;33m'
-CYAN='\033[0;36m'
-NC='\033[0m' # No Color
+RED='\033[0;31m'
+GRAY='\033[0;90m'
+NC='\033[0m'
 
-echo -e "${CYAN}===========================================================${NC}"
-echo -e "${CYAN}       ITSUKI PROGRAMMING LANGUAGE - INSTALADOR LINUX      ${NC}"
-echo -e "${CYAN}===========================================================${NC}"
+echo ""
+echo -e "${CYAN}=======================================================${NC}"
+echo -e "${CYAN}         ITSUKI COMPILER - INSTALADOR (LINUX)          ${NC}"
+echo -e "${CYAN}=======================================================${NC}"
 echo ""
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
-# 1. Localizar binario y biblioteca estandar
+# -----------------------------------------------------------
+# [1/5] 20% Deteccion de arquitectura y GCC
+# -----------------------------------------------------------
+echo -e "${YELLOW} [====----------------]  20%  Detectando arquitectura de la PC...${NC}"
+HOST_RAW=$(uname -m)
+case "$HOST_RAW" in
+    x86_64|amd64)
+        OS_BITS=64
+        HOST_ARCH_NAME="x86_64"
+        ;;
+    i386|i486|i586|i686)
+        OS_BITS=32
+        HOST_ARCH_NAME="x86"
+        ;;
+    aarch64|arm64)
+        OS_BITS=64
+        HOST_ARCH_NAME="arm64"
+        ;;
+    arm*)
+        OS_BITS=32
+        HOST_ARCH_NAME="arm"
+        ;;
+    *)
+        OS_BITS=32
+        HOST_ARCH_NAME="$HOST_RAW"
+        ;;
+esac
+
+GCC_PATH="gcc"
+GCC_MACHINE="desconocido"
+GCC_BITS=$OS_BITS
+GCC_FLAGS=""
+MULTILIB_OK=0
+
+if command -v gcc >/dev/null 2>&1; then
+    GCC_MACHINE=$(gcc -dumpmachine 2>/dev/null || echo "desconocido")
+    if [[ "$GCC_MACHINE" =~ 64 ]]; then
+        GCC_BITS=64
+    else
+        GCC_BITS=32
+    fi
+
+    if [ "$OS_BITS" -eq 64 ]; then
+        GCC_FLAGS="-m32 -no-pie"
+        if echo "int main(void){return 0;}" | gcc -m32 -x c - -o /tmp/itsuki_probe >/dev/null 2>&1; then
+            MULTILIB_OK=1
+        else
+            MULTILIB_OK=0
+        fi
+        rm -f /tmp/itsuki_probe 2>/dev/null || true
+    else
+        MULTILIB_OK=1
+        GCC_FLAGS="-no-pie"
+    fi
+fi
+
+# -----------------------------------------------------------
+# [2/5] 40% Localizar archivos
+# -----------------------------------------------------------
+echo -e "${YELLOW} [========------------]  40%  Localizando archivos del compilador...${NC}"
 BIN_SRC=""
 for cand in "$SCRIPT_DIR/itsuki" "$SCRIPT_DIR/build/itsuki" "$SCRIPT_DIR/build/linux/itsuki" "$SCRIPT_DIR/linux/itsuki"; do
     if [ -f "$cand" ]; then
@@ -29,8 +90,7 @@ for cand in "$SCRIPT_DIR/itsuki" "$SCRIPT_DIR/build/itsuki" "$SCRIPT_DIR/build/l
 done
 
 if [ -z "$BIN_SRC" ]; then
-    echo -e "${RED}[ERROR] No se pudo encontrar el binario 'itsuki'.${NC}"
-    echo "Asegurate de compilar el proyecto antes de ejecutar el instalador."
+    echo -e "${RED}[ERROR] No se pudo encontrar el binario 'itsuki'. Compila primero con ./build.sh${NC}"
     exit 1
 fi
 
@@ -42,31 +102,28 @@ for cand in "$SCRIPT_DIR/lib" "$SCRIPT_DIR/linux/lib" "$SCRIPT_DIR/build/linux/l
     fi
 done
 
-echo -e "${YELLOW}[1/5] Localizando archivos:${NC}"
-echo "      Binario: $BIN_SRC"
-[ -n "$LIB_SRC" ] && echo "      Librerias: $LIB_SRC"
-
-# 2. Determinar modo de instalacion (Root o Usuario normal)
-if [ "$EUID" -eq 0 ]; then
-    INSTALL_MODE="system"
-    INSTALL_DIR="/usr/local"
-    BIN_DIR="/usr/local/bin"
-    LIB_DIR="/usr/local/share/itsuki/lib"
-    PKG_DIR="/var/lib/itsuki/packages"
-    echo -e "${YELLOW}[2/5] Modo de instalacion: Sistema global (/usr/local)${NC}"
-else
-    INSTALL_MODE="user"
-    INSTALL_DIR="$HOME/.itsuki"
-    BIN_DIR="$HOME/.itsuki/bin"
-    LIB_DIR="$HOME/.itsuki/lib"
-    PKG_DIR="$HOME/.itsuki/packages"
-    echo -e "${YELLOW}[2/5] Modo de instalacion: Usuario actual ($INSTALL_DIR)${NC}"
+# -----------------------------------------------------------
+# [3/5] 60% Preparar carpetas en espacio de usuario (~/.itsuki)
+# Sin requerir 'sudo' ni permisos de administrador
+# -----------------------------------------------------------
+echo -e "${YELLOW} [============--------]  60%  Preparando directorios del sistema (~/.itsuki)...${NC}"
+TARGET_HOME="${HOME:-/tmp}"
+if [ -n "$SUDO_USER" ] && [ "$SUDO_USER" != "root" ]; then
+    TARGET_HOME=$(getent passwd "$SUDO_USER" 2>/dev/null | cut -d: -f6 || echo "/home/$SUDO_USER")
 fi
 
-mkdir -p "$BIN_DIR" "$LIB_DIR" "$PKG_DIR"
+INSTALL_DIR="$TARGET_HOME/.itsuki"
+BIN_DIR="$INSTALL_DIR/bin"
+LIB_DIR="$INSTALL_DIR/lib"
+CONFIG_DIR="$INSTALL_DIR"
+PKG_DIR="$INSTALL_DIR/packages"
 
-# 3. Copiar binario y librerias
-echo -e "${YELLOW}[3/5] Instalando ejecutables y bibliotecas...${NC}"
+mkdir -p "$BIN_DIR" "$LIB_DIR" "$CONFIG_DIR" "$PKG_DIR"
+
+# -----------------------------------------------------------
+# [4/5] 80% Copiar binario y generar arch.conf
+# -----------------------------------------------------------
+echo -e "${YELLOW} [================----]  80%  Instalando binario, librerias y arch.conf...${NC}"
 cp -f "$BIN_SRC" "$BIN_DIR/itsuki"
 chmod +x "$BIN_DIR/itsuki"
 
@@ -74,116 +131,59 @@ if [ -n "$LIB_SRC" ]; then
     cp -rf "$LIB_SRC"/* "$LIB_DIR/"
 fi
 
-# 4. Configurar PATH si es instalacion de usuario
-echo -e "${YELLOW}[4/5] Verificando variable de entorno PATH...${NC}"
-if [ "$INSTALL_MODE" = "user" ]; then
-    PATH_LINE="export PATH=\"\$HOME/.itsuki/bin:\$PATH\""
-    ADDED=0
-    for rc in "$HOME/.bashrc" "$HOME/.zshrc" "$HOME/.profile"; do
-        if [ -f "$rc" ]; then
-            if ! grep -q ".itsuki/bin" "$rc"; then
-                echo "" >> "$rc"
-                echo "# Itsuki Programming Language" >> "$rc"
-                echo "$PATH_LINE" >> "$rc"
-                ADDED=1
-                echo -e "      ${GREEN}[OK] Agregado a $rc${NC}"
-            fi
-        fi
-    done
-    if [ "$ADDED" -eq 0 ]; then
-        echo -e "      ${GREEN}[INFO] PATH ya estaba configurado.${NC}"
-    fi
-    export PATH="$BIN_DIR:$PATH"
-else
-    echo -e "      ${GREEN}[OK] Instalado en /usr/local/bin (disponible en PATH para todos los usuarios).${NC}"
-fi
+cat << EOF > "$CONFIG_DIR/arch.conf"
+# ===========================================================
+#      ITSUKI PROGRAMMING LANGUAGE - ARCH CONFIG
+#   Generado automaticamente durante la instalacion Linux
+# ===========================================================
+os_name=linux
+os_bits=$OS_BITS
+host_arch=$HOST_ARCH_NAME
+gcc_path=$GCC_PATH
+gcc_arch=$GCC_MACHINE
+gcc_bits=$GCC_BITS
+multilib_supported=$MULTILIB_OK
+gcc_flags=$GCC_FLAGS
+EOF
 
-# 5. Generar script de desinstalacion
-UNINSTALL_PATH="$INSTALL_DIR/uninstall.sh"
-if [ "$INSTALL_MODE" = "system" ]; then
-    UNINSTALL_PATH="/usr/local/bin/itsuki-uninstall"
-fi
-
-cat << 'EOF' > "$UNINSTALL_PATH"
+# Desinstalador 100% en espacio de usuario
+UNINSTALL_PATH="$CONFIG_DIR/uninstall.sh"
+cat << EOF > "$UNINSTALL_PATH"
 #!/usr/bin/env bash
-RED='\033[0;31m'
-GREEN='\033[0;32m'
-NC='\033[0m'
-
-echo -e "${RED}===========================================================${NC}"
-echo -e "${RED}       DESINSTALADOR DE ITSUKI PROGRAMMING LANGUAGE        ${NC}"
-echo -e "${RED}===========================================================${NC}"
 read -p "¿Deseas desinstalar Itsuki de tu sistema? (s/N): " CONFIRM
-if [[ ! "$CONFIRM" =~ ^[sS]$ ]]; then
-    echo "Desinstalacion cancelada."
-    exit 0
-fi
-
-if [ -f "/usr/local/bin/itsuki" ]; then
-    sudo rm -f "/usr/local/bin/itsuki" "/usr/local/bin/itsuki-uninstall"
-    sudo rm -rf "/usr/local/share/itsuki"
-    echo -e "${GREEN}[OK] Itsuki eliminado de /usr/local.${NC}"
-fi
-
-if [ -d "$HOME/.itsuki" ]; then
-    rm -rf "$HOME/.itsuki/bin" "$HOME/.itsuki/lib"
-    echo -e "${GREEN}[OK] Itsuki eliminado de $HOME/.itsuki.${NC}"
-fi
-
-echo -e "${GREEN}[OK] Itsuki ha sido desinstalado correctamente.${NC}"
+if [[ ! "\$CONFIRM" =~ ^[sS]$ ]]; then exit 0; fi
+rm -rf "$BIN_DIR" "$LIB_DIR" "$CONFIG_DIR/arch.conf" "$CONFIG_DIR/uninstall.sh" 2>/dev/null || true
+echo "[OK] Itsuki ha sido desinstalado correctamente de tu usuario."
 EOF
 chmod +x "$UNINSTALL_PATH"
 
-# Comprobar dependencias (GCC y Git)
-echo ""
-echo -e "${YELLOW}[5/5] Comprobando dependencias:${NC}"
-if command -v gcc >/dev/null 2>&1; then
-    echo -e "      ${GREEN}[OK] GCC detectado: $(command -v gcc)${NC}"
-    # Verificar si tiene soporte multilib de 32 bits (-m32)
-    if echo "int main(void){return 0;}" | gcc -m32 -x c - -o /dev/null >/dev/null 2>&1; then
-        echo -e "      ${GREEN}[OK] Soporte de 32 bits (multilib) verificado correctamente.${NC}"
-    else
-        echo -e "      ${YELLOW}[AVISO] Tu sistema de 64 bits requiere librerias de enlace (multilib).${NC}"
-        if command -v apt-get >/dev/null 2>&1; then
-            echo -e "      ${CYAN}Se instalara 'gcc-multilib' y 'libc6-dev-i386' para soporte completo:${NC}"
-            if [ "$EUID" -eq 0 ]; then
-                apt-get update -qq && apt-get install -y -qq gcc-multilib libc6-dev-i386
-                echo -e "      ${GREEN}[OK] Soporte multilib instalado exitosamente.${NC}"
-            else
-                echo -e "      ${YELLOW}Ejecuta: sudo apt update && sudo apt install gcc-multilib libc6-dev-i386${NC}"
-            fi
-        else
-            echo -e "      ${CYAN}En Fedora: sudo dnf install glibc-devel.i686 libgcc.i686${NC}"
-            echo -e "      ${CYAN}En Arch:   sudo pacman -S lib32-glibc lib32-gcc-libs${NC}"
-        fi
+# -----------------------------------------------------------
+# [5/5] 100% Configurar PATH
+# -----------------------------------------------------------
+echo -e "${GREEN} [====================] 100%  Configurando variable de entorno PATH...${NC}"
+PATH_LINE="export PATH=\"\$HOME/.itsuki/bin:\$PATH\""
+for rc in "$TARGET_HOME/.bashrc" "$TARGET_HOME/.zshrc" "$TARGET_HOME/.profile"; do
+    if [ -f "$rc" ] && ! grep -q ".itsuki/bin" "$rc"; then
+        echo "" >> "$rc"
+        echo "# Itsuki Programming Language" >> "$rc"
+        echo "$PATH_LINE" >> "$rc"
     fi
-else
-    echo -e "      ${RED}[ADVERTENCIA] GCC no encontrado. Instala gcc con tu gestor (ej: apt install gcc gcc-multilib)${NC}"
-fi
-
-if command -v git >/dev/null 2>&1; then
-    echo -e "      ${GREEN}[OK] Git detectado: $(command -v git)${NC}"
-else
-    echo -e "      ${RED}[ADVERTENCIA] Git no encontrado. Instala git para usar 'itsuki install'.${NC}"
-fi
+done
+export PATH="$BIN_DIR:$PATH"
 
 echo ""
-echo -e "${GREEN}===========================================================${NC}"
-echo -e "${GREEN}       ¡INSTALACION COMPLETADA EXITOSAMENTE!               ${NC}"
-echo -e "${GREEN}===========================================================${NC}"
-echo "  Ejecutable: $BIN_DIR/itsuki"
-echo "  Runtime   : $LIB_DIR"
-echo "  Paquetes  : $PKG_DIR"
+echo -e "${GREEN}=======================================================${NC}"
+echo -e "${GREEN} [OK] ITSUKI INSTALADO EXITOSAMENTE ($HOST_ARCH_NAME $OS_BITS-bit)${NC}"
+echo -e "${GREEN}=======================================================${NC}"
+echo -e "  Instalacion: Espacio de usuario (Sin sudo / root)"
+echo -e "  Ejecutable : $BIN_DIR/itsuki"
+echo -e "  Runtime    : $LIB_DIR"
+echo -e "  Config     : $CONFIG_DIR/arch.conf"
+echo -e "  Toolchain  : $GCC_MACHINE (flags: $GCC_FLAGS)"
+echo -e "${GRAY}-------------------------------------------------------${NC}"
+echo -e "  Comandos para comenzar:"
+echo -e "    ${CYAN}itsuki run archivo.suki${NC}   Compilar y ejecutar"
+echo -e "    ${CYAN}itsuki doctor${NC}             Ver estado del entorno"
+echo -e "    ${CYAN}itsuki --help${NC}             Ver todas las opciones"
+echo -e "${GREEN}=======================================================${NC}"
 echo ""
-"$BIN_DIR/itsuki" --version || true
-echo ""
-echo -e "${CYAN}Para empezar a programar en Itsuki:${NC}"
-echo "  1. Abre una nueva terminal o ejecuta:"
-if [ "$INSTALL_MODE" = "user" ]; then
-    echo "     export PATH=\"\$HOME/.itsuki/bin:\$PATH\""
-fi
-echo "  2. Comprueba tu instalacion:"
-echo "     itsuki --help"
-echo "     itsuki list"
-echo "     itsuki run programa.suki"
-echo -e "${GREEN}===========================================================${NC}"

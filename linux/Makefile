@@ -8,6 +8,10 @@ all: $(TARGET)
 $(TARGET): $(SRCS)
 	$(CC) $(CFLAGS) $(SRCS) -o $(TARGET)
 	@echo "[OK] Compilador Itsuki generado con exito: ./$(TARGET)"
+	@./$(TARGET) --version
+
+doctor: $(TARGET)
+	@./$(TARGET) doctor
 
 clean:
 	rm -f $(TARGET) *.tmp.* *.o

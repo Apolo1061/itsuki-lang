@@ -984,38 +984,50 @@ static char* read_file_content(const char* filepath) {
 static int try_resolve_file(const char* base_dir, const char* name, int is_system_include, char* out_path) {
     if (!name || name[0] == '\0') return 0;
 
-    int has_ext = (strchr(name, '.') != NULL);
+    // Compatibilidad transparente con encabezados estandar de C
+    const char* effective_name = name;
+    if (is_system_include) {
+        if (strcmp(name, "stdio.h") == 0 || strcmp(name, "stdio") == 0 ||
+            strcmp(name, "stdlib.h") == 0 || strcmp(name, "stdlib") == 0 ||
+            strcmp(name, "string.h") == 0 || strcmp(name, "time.h") == 0) {
+            effective_name = "c.huki";
+        } else if (strcmp(name, "math.h") == 0) {
+            effective_name = "math.huki";
+        }
+    }
+
+    int has_ext = (strchr(effective_name, '.') != NULL);
 
     if (is_system_include) {
         // 1. Directivas <...>: buscar primero en librerias estandar integradas (embebidas)
-        if (has_embedded_file(name)) {
-            snprintf(out_path, 512, "embedded:%.490s", name);
+        if (has_embedded_file(effective_name)) {
+            snprintf(out_path, 512, "embedded:%.490s", effective_name);
             return 1;
         }
         char with_ext[256];
-        snprintf(with_ext, sizeof(with_ext), "%.240s.huki", name);
+        snprintf(with_ext, sizeof(with_ext), "%.240s.huki", effective_name);
         if (has_embedded_file(with_ext)) {
             snprintf(out_path, 512, "embedded:%.490s", with_ext);
             return 1;
         }
-        snprintf(with_ext, sizeof(with_ext), "%.240s.suki", name);
+        snprintf(with_ext, sizeof(with_ext), "%.240s.suki", effective_name);
         if (has_embedded_file(with_ext)) {
             snprintf(out_path, 512, "embedded:%.490s", with_ext);
             return 1;
         }
-        snprintf(with_ext, sizeof(with_ext), "%.240s.hu", name);
+        snprintf(with_ext, sizeof(with_ext), "%.240s.hu", effective_name);
         if (has_embedded_file(with_ext)) {
             snprintf(out_path, 512, "embedded:%.490s", with_ext);
             return 1;
         }
-        snprintf(with_ext, sizeof(with_ext), "%.240s.su", name);
+        snprintf(with_ext, sizeof(with_ext), "%.240s.su", effective_name);
         if (has_embedded_file(with_ext)) {
             snprintf(out_path, 512, "embedded:%.490s", with_ext);
             return 1;
         }
 
         // 2. Buscar en paquetes globales instalados en el sistema (~/.itsuki/packages/)
-        if (pkg_resolve_include(name, 1, out_path, 512)) {
+        if (pkg_resolve_include(effective_name, 1, out_path, 512)) {
             return 1;
         }
 
