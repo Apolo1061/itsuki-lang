@@ -1,10 +1,9 @@
 .intel_syntax noprefix
 .section .data
     .align 4
-    stdout_handle: .long 0
-    stdin_handle:  .long 0
     bytes_rw:      .long 0
-    newline_str:   .asciz "\r\n"
+    current_brk:   .long 0
+    newline_str:   .asciz "\n"
     null_str:      .asciz "(null)"
 
     rand_seed:     .long 1
@@ -18,169 +17,210 @@
 .section .text
 # I/O y Consola
 .globl _fundamental_printf
+.globl fundamental_printf
 .globl _printf
 .globl _fundamental_puts
+.globl fundamental_puts
 .globl _puts
 .globl _fundamental_putchar
+.globl fundamental_putchar
 .globl _putchar
 .globl _fundamental_getchar
+.globl fundamental_getchar
 .globl _getchar
 .globl _fundamental_print_str
+.globl fundamental_print_str
 .globl _fundamental_println_str
+.globl fundamental_println_str
 .globl _fundamental_println_empty
+.globl fundamental_println_empty
 .globl _fundamental_print_int
+.globl fundamental_print_int
 .globl _fundamental_println_int
-.globl _fundamental_print_float
-.globl fundamental_print_float
-.globl _fundamental_println_float
-.globl fundamental_println_float
+.globl fundamental_println_int
 .globl _fundamental_read_str
+.globl fundamental_read_str
 .globl _fundamental_read_int
+.globl fundamental_read_int
 
 # Memoria dinamica y buffers
 .globl _fundamental_malloc
+.globl fundamental_malloc
 .globl _malloc
 .globl _fundamental_free
+.globl fundamental_free
 .globl _free
 .globl _fundamental_calloc
+.globl fundamental_calloc
 .globl _calloc
 .globl _fundamental_realloc
+.globl fundamental_realloc
 .globl _realloc
 .globl _fundamental_memset
+.globl fundamental_memset
 .globl _memset
 .globl _fundamental_memcpy
+.globl fundamental_memcpy
 .globl _memcpy
 .globl _fundamental_memmove
+.globl fundamental_memmove
 .globl _memmove
 .globl _fundamental_memcmp
+.globl fundamental_memcmp
 .globl _memcmp
 
 # Manipulacion de cadenas
 .globl _fundamental_strlen
+.globl fundamental_strlen
 .globl _strlen
 .globl _fundamental_strcpy
+.globl fundamental_strcpy
 .globl _strcpy
 .globl _fundamental_strncpy
+.globl fundamental_strncpy
 .globl _strncpy
 .globl _fundamental_strcat
+.globl fundamental_strcat
 .globl _strcat
 .globl _fundamental_strncat
+.globl fundamental_strncat
 .globl _strncat
 .globl _fundamental_strcmp
+.globl fundamental_strcmp
 .globl _strcmp
 .globl _fundamental_strncmp
+.globl fundamental_strncmp
 .globl _strncmp
 .globl _fundamental_strchr
+.globl fundamental_strchr
 .globl _strchr
 .globl _fundamental_strrchr
+.globl fundamental_strrchr
 .globl _strrchr
 .globl _fundamental_strstr
+.globl fundamental_strstr
 .globl _strstr
 .globl _fundamental_strdup
+.globl fundamental_strdup
 .globl _strdup
 .globl _fundamental_char_at
+.globl fundamental_char_at
 .globl _char_at
 .globl _fundamental_set_char_at
+.globl fundamental_set_char_at
 .globl _set_char_at
 
 # Clasificacion y conversion de caracteres (ctype)
 .globl _fundamental_is_digit
+.globl fundamental_is_digit
 .globl _is_digit
 .globl _fundamental_is_alpha
+.globl fundamental_is_alpha
 .globl _is_alpha
 .globl _fundamental_is_alnum
+.globl fundamental_is_alnum
 .globl _is_alnum
 .globl _fundamental_is_space
+.globl fundamental_is_space
 .globl _is_space
 .globl _fundamental_is_upper
+.globl fundamental_is_upper
 .globl _is_upper
 .globl _fundamental_is_lower
+.globl fundamental_is_lower
 .globl _is_lower
 .globl _fundamental_is_xdigit
+.globl fundamental_is_xdigit
 .globl _is_xdigit
 .globl _fundamental_to_upper
+.globl fundamental_to_upper
 .globl _to_upper
 .globl _fundamental_to_lower
+.globl fundamental_to_lower
 .globl _to_lower
 
 # Conversiones numericas
 .globl _fundamental_atoi
+.globl fundamental_atoi
 .globl _atoi
 .globl _fundamental_itoa
+.globl fundamental_itoa
 .globl _itoa
 .globl _fundamental_htoi
+.globl fundamental_htoi
 .globl _htoi
 
 # Matematicas y numeros aleatorios
 .globl _fundamental_abs
+.globl fundamental_abs
 .globl _abs
 .globl _fundamental_min
+.globl fundamental_min
 .globl _min
 .globl _fundamental_max
+.globl fundamental_max
 .globl _max
 .globl _fundamental_clamp
+.globl fundamental_clamp
 .globl _clamp
 .globl _fundamental_pow
+.globl fundamental_pow
 .globl _pow
 .globl _fundamental_sqrt
+.globl fundamental_sqrt
 .globl _sqrt
 .globl _fundamental_gcd
+.globl fundamental_gcd
 .globl _gcd
 .globl _fundamental_lcm
+.globl fundamental_lcm
 .globl _lcm
 .globl _fundamental_rand
+.globl fundamental_rand
 .globl _rand
 .globl _fundamental_srand
+.globl fundamental_srand
 .globl _srand
 
 # Sistema, proceso y tiempo
 .globl _fundamental_exit
+.globl fundamental_exit
 .globl _exit
 .globl _fundamental_sleep
+.globl fundamental_sleep
 .globl _sleep
 .globl _fundamental_get_tick_count
+.globl fundamental_get_tick_count
 .globl _get_tick_count
 .globl _fundamental_time
+.globl fundamental_time
 .globl _time
 
 # Operaciones con archivos nativas de Win32 (kernel32)
 .globl _fundamental_file_exists
+.globl fundamental_file_exists
 .globl _file_exists
 .globl _fundamental_file_size
+.globl fundamental_file_size
 .globl _file_size
 .globl _fundamental_file_read_all
+.globl fundamental_file_read_all
 .globl _file_read_all
 .globl _fundamental_file_write_all
+.globl fundamental_file_write_all
 .globl _file_write_all
 .globl _fundamental_file_append
+.globl fundamental_file_append
 .globl _file_append
 .globl _fundamental_file_remove
+.globl fundamental_file_remove
 .globl _file_remove
 
-# Helper: Obtener handle de STDOUT
-_get_stdout:
-    mov eax, [stdout_handle]
-    test eax, eax
-    jnz .got_stdout
-    push -11            # STD_OUTPUT_HANDLE = -11
-    call _GetStdHandle@4
-    mov [stdout_handle], eax
-.got_stdout:
-    ret
-
-# Helper: Obtener handle de STDIN
-_get_stdin:
-    mov eax, [stdin_handle]
-    test eax, eax
-    jnz .got_stdin
-    push -10            # STD_INPUT_HANDLE = -10
-    call _GetStdHandle@4
-    mov [stdin_handle], eax
-.got_stdin:
-    ret
-
-# Helper: Imprimir buffer con longitud en EDX
+# Helper: Imprimir buffer con longitud en EDX (Linux sys_write syscall 4)
 # EAX = buffer, EDX = longitud
+.globl write_raw
+.globl _write_raw
+write_raw:
 _write_raw:
     test edx, edx
     jle .write_raw_done
@@ -188,59 +228,58 @@ _write_raw:
     push ebx
     push esi
     push edi
-    push ebp
 
-    mov esi, eax        # buffer
-    mov edi, edx        # length
+    mov esi, eax        # esi = buffer
+    mov edi, edx        # edi = longitud
 
-    call _get_stdout    # EAX = stdout_handle
-    mov ebx, eax
+    mov eax, 4          # sys_write = 4
+    mov ebx, 1          # stdout fd = 1
+    mov ecx, esi        # ecx = buffer
+    mov edx, edi        # edx = longitud
+    int 0x80
 
-    push 0                      # lpOverlapped
-    push offset bytes_rw        # lpNumberOfBytesWritten
-    push edi                    # nNumberOfBytesToWrite
-    push esi                    # lpBuffer
-    push ebx                    # hFile
-    call _WriteFile@20
-
-    pop ebp
     pop edi
     pop esi
     pop ebx
 .write_raw_done:
     ret
 
-# Helper: Lee 1 byte de STDIN en AL. Retorna CF=1 en EOF/error, o CF=0 con byte en AL
+# Helper: Lee 1 byte de STDIN en AL (Linux sys_read syscall 3)
+.globl read_byte
+.globl _read_byte
+read_byte:
 _read_byte:
     push ebx
-    call _get_stdin
-    mov ebx, eax
+    push ecx
+    push edx
 
-    push 0
-    push offset bytes_rw
-    push 1
-    push offset one_char_buf
-    push ebx
-    call _ReadFile@20
+    mov eax, 3          # sys_read = 3
+    mov ebx, 0          # stdin fd = 0
+    mov ecx, offset one_char_buf
+    mov edx, 1
+    int 0x80
 
     test eax, eax
-    jz .rb_eof
-    cmp dword ptr [bytes_rw], 1
-    jne .rb_eof
+    jle .rb_eof
 
     mov al, [one_char_buf]
     clc
+    pop edx
+    pop ecx
     pop ebx
     ret
 
 .rb_eof:
     xor al, al
     stc
+    pop edx
+    pop ecx
     pop ebx
     ret
 
 # _fundamental_print_str(char* str)
 _fundamental_print_str:
+fundamental_print_str:
     push ebp
     mov ebp, esp
     push esi
@@ -270,6 +309,7 @@ _fundamental_print_str:
 
 # _fundamental_println_empty()
 _fundamental_println_empty:
+fundamental_println_empty:
     push ebp
     mov ebp, esp
     mov eax, offset newline_str
@@ -280,6 +320,7 @@ _fundamental_println_empty:
 
 # _fundamental_println_str(char* str)
 _fundamental_println_str:
+fundamental_println_str:
     push ebp
     mov ebp, esp
     push dword ptr [ebp + 8]
@@ -292,6 +333,7 @@ _fundamental_println_str:
 # _fundamental_puts(char* str)
 # Imprime una cadena seguida de fin de linea y retorna 0 en EAX
 _fundamental_puts:
+fundamental_puts:
 _puts:
     push ebp
     mov ebp, esp
@@ -457,6 +499,7 @@ _int_to_hex:
 
 # _fundamental_print_int(int val)
 _fundamental_print_int:
+fundamental_print_int:
     push ebp
     mov ebp, esp
 
@@ -469,6 +512,7 @@ _fundamental_print_int:
 
 # _fundamental_println_int(int val)
 _fundamental_println_int:
+fundamental_println_int:
     push ebp
     mov ebp, esp
 
@@ -480,94 +524,10 @@ _fundamental_println_int:
     pop ebp
     ret
 
-# _fundamental_print_float(double val)
-_fundamental_print_float:
-fundamental_print_float:
-    push ebp
-    mov ebp, esp
-    sub esp, 32
-
-    fld qword ptr [ebp + 8]
-    ftst
-    fnstsw ax
-    sahf
-    jnc .flt_positive
-    mov byte ptr [one_char_buf], '-'
-    mov eax, offset one_char_buf
-    mov edx, 1
-    call _write_raw
-    fchs
-
-.flt_positive:
-    fld st(0)
-    fnstcw [ebp - 4]
-    mov ax, [ebp - 4]
-    or ax, 0x0C00
-    mov [ebp - 8], ax
-    fldcw [ebp - 8]
-    fistp qword ptr [ebp - 16]
-    fldcw [ebp - 4]
-
-    mov eax, [ebp - 16]
-    call _int_to_str
-    call _write_raw
-
-    mov byte ptr [one_char_buf], '.'
-    mov eax, offset one_char_buf
-    mov edx, 1
-    call _write_raw
-
-    fild qword ptr [ebp - 16]
-    fsubp st(1), st(0)
-    
-    mov dword ptr [ebp - 20], 1000000
-    fild dword ptr [ebp - 20]
-    fmulp st(1), st(0)
-
-    fistp qword ptr [ebp - 16]
-
-    mov eax, [ebp - 16]
-    test eax, eax
-    jns .frac_pos
-    neg eax
-.frac_pos:
-    mov ecx, 6
-    mov edi, offset int_conv_buf
-    add edi, 5
-.frac_digit_loop:
-    xor edx, edx
-    mov ebx, 10
-    div ebx
-    add dl, '0'
-    mov [edi], dl
-    dec edi
-    dec ecx
-    jnz .frac_digit_loop
-
-    mov eax, offset int_conv_buf
-    mov edx, 6
-    call _write_raw
-
-    mov esp, ebp
-    pop ebp
-    ret
-
-# _fundamental_println_float(double val)
-_fundamental_println_float:
-fundamental_println_float:
-    push ebp
-    mov ebp, esp
-    push dword ptr [ebp + 12]
-    push dword ptr [ebp + 8]
-    call _fundamental_print_float
-    add esp, 8
-    call _fundamental_println_empty
-    pop ebp
-    ret
-
 # _fundamental_printf(char* format, ...)
 # Implementacion 100% nativa en ensamblador x86 independiente de libc
 _fundamental_printf:
+fundamental_printf:
 _printf:
     push ebp
     mov ebp, esp
@@ -600,8 +560,6 @@ _printf:
     je .fmt_int
     cmp al, 'i'
     je .fmt_int
-    cmp al, 'f'
-    je .fmt_float
     cmp al, 'u'
     je .fmt_uint
     cmp al, 'x'
@@ -635,16 +593,6 @@ _printf:
     add ebx, 4
     call _int_to_str
     call _printf_append
-    inc esi
-    jmp .printf_loop
-
-.fmt_float:
-    call _printf_flush
-    push dword ptr [ebx + 4]
-    push dword ptr [ebx]
-    call _fundamental_print_float
-    add esp, 8
-    add ebx, 8
     inc esi
     jmp .printf_loop
 
@@ -801,6 +749,7 @@ _printf_flush:
 # _fundamental_read_str(char* dest)
 # Usa EDI = buffer dest, ESI = contador/indice
 _fundamental_read_str:
+fundamental_read_str:
     push ebp
     mov ebp, esp
     push ebx
@@ -842,6 +791,7 @@ _fundamental_read_str:
 # _fundamental_read_int(int* dest)
 # Usa EDI = dest pointer, ESI = acumulador numerico, EBX = signo (1 si neg)
 _fundamental_read_int:
+fundamental_read_int:
     push ebp
     mov ebp, esp
     push ebx
@@ -933,9 +883,13 @@ _fundamental_read_int:
 # 1. MODULO DE MEMORIA DINAMICA Y BUFFERS
 # ========================================================
 
-# void* malloc(int size)
+# void* malloc(int size) (Linux sys_brk bump allocator)
+.globl fundamental_malloc
+.globl _fundamental_malloc
+.globl fundamental_malloc
+fundamental_malloc:
 _fundamental_malloc:
-_malloc:
+fundamental_malloc:
     push ebp
     mov ebp, esp
     push ebx
@@ -943,21 +897,36 @@ _malloc:
     mov eax, [ebp + 8]      # size
     test eax, eax
     jg .malloc_valid_size
-    mov eax, 1              # al menos 1 byte
+    mov eax, 1
 .malloc_valid_size:
-    mov ebx, eax
+    add eax, 7
+    and eax, -8             # align to 8 bytes
+    push eax
 
-    call _GetProcessHeap@0  # EAX = heap handle
-    test eax, eax
-    jz .malloc_fail
+    mov ebx, [current_brk]
+    test ebx, ebx
+    jnz .has_brk
 
-    push ebx                # dwBytes
-    push 8                  # dwFlags = HEAP_ZERO_MEMORY
-    push eax                # hHeap
-    call _HeapAlloc@12
+    xor ebx, ebx
+    mov eax, 45             # sys_brk = 45
+    int 0x80
+    mov [current_brk], eax
+
+.has_brk:
+    mov ebx, [current_brk]
+    pop eax
+    push ebx                # return pointer
+    add ebx, eax
+    mov eax, 45             # sys_brk
+    int 0x80
+    cmp eax, [esp]
+    jbe .malloc_fail
+    mov [current_brk], eax
+    pop eax
     jmp .malloc_done
 
 .malloc_fail:
+    pop eax
     xor eax, eax
 .malloc_done:
     pop ebx
@@ -965,52 +934,59 @@ _malloc:
     ret
 
 # void free(void* ptr)
+.globl fundamental_free
+.globl _fundamental_free
+.globl fundamental_free
+fundamental_free:
 _fundamental_free:
-_free:
-    push ebp
-    mov ebp, esp
-    push ebx
-
-    mov ebx, [ebp + 8]      # ptr
-    test ebx, ebx
-    jz .free_done           # free(NULL) es seguro
-
-    call _GetProcessHeap@0  # EAX = heap handle
-    test eax, eax
-    jz .free_done
-
-    push ebx                # lpMem
-    push 0                  # dwFlags = 0
-    push eax                # hHeap
-    call _HeapFree@12
-
-.free_done:
-    pop ebx
-    pop ebp
+fundamental_free:
     ret
 
 # void* calloc(int num, int size)
+.globl fundamental_calloc
+.globl _fundamental_calloc
+.globl fundamental_calloc
+fundamental_calloc:
 _fundamental_calloc:
-_calloc:
+fundamental_calloc:
     push ebp
     mov ebp, esp
+    push edi
 
     mov eax, [ebp + 8]
     imul eax, [ebp + 12]    # bytes = num * size
     push eax
-    call _fundamental_malloc
+    call fundamental_malloc
     add esp, 4
+    test eax, eax
+    jz .calloc_done
 
+    mov edi, eax
+    mov ecx, [ebp + 8]
+    imul ecx, [ebp + 12]
+    push eax
+    xor al, al
+    cld
+    rep stosb
+    pop eax
+
+.calloc_done:
+    pop edi
     pop ebp
     ret
 
 # void* realloc(void* ptr, int new_size)
+.globl fundamental_realloc
+.globl _fundamental_realloc
+.globl fundamental_realloc
+fundamental_realloc:
 _fundamental_realloc:
-_realloc:
+fundamental_realloc:
     push ebp
     mov ebp, esp
     push ebx
     push esi
+    push edi
 
     mov ebx, [ebp + 8]      # ptr
     mov esi, [ebp + 12]     # new_size
@@ -1018,34 +994,33 @@ _realloc:
     test ebx, ebx
     jnz .realloc_has_ptr
     push esi
-    call _fundamental_malloc
+    call fundamental_malloc
     add esp, 4
     jmp .realloc_done
 
 .realloc_has_ptr:
     test esi, esi
     jnz .realloc_valid_size
-    push ebx
-    call _fundamental_free
-    add esp, 4
     xor eax, eax
     jmp .realloc_done
 
 .realloc_valid_size:
-    call _GetProcessHeap@0
+    push esi
+    call fundamental_malloc
+    add esp, 4
     test eax, eax
-    jz .realloc_fail
+    jz .realloc_done
 
-    push esi                # dwBytes
-    push ebx                # lpMem
-    push 8                  # dwFlags = HEAP_ZERO_MEMORY
-    push eax                # hHeap
-    call _HeapReAlloc@16
-    jmp .realloc_done
+    mov edi, eax
+    mov ecx, esi
+    push eax
+    mov esi, ebx
+    cld
+    rep movsb
+    pop eax
 
-.realloc_fail:
-    xor eax, eax
 .realloc_done:
+    pop edi
     pop esi
     pop ebx
     pop ebp
@@ -1053,6 +1028,7 @@ _realloc:
 
 # void* memset(void* dest, int value, int count)
 _fundamental_memset:
+fundamental_memset:
 _memset:
     push ebp
     mov ebp, esp
@@ -1076,6 +1052,7 @@ _memset:
 
 # void* memcpy(void* dest, const void* src, int count)
 _fundamental_memcpy:
+fundamental_memcpy:
 _memcpy:
     push ebp
     mov ebp, esp
@@ -1106,6 +1083,7 @@ _memcpy:
 
 # void* memmove(void* dest, const void* src, int count)
 _fundamental_memmove:
+fundamental_memmove:
 _memmove:
     push ebp
     mov ebp, esp
@@ -1150,6 +1128,7 @@ _memmove:
 
 # int memcmp(const void* s1, const void* s2, int count)
 _fundamental_memcmp:
+fundamental_memcmp:
 _memcmp:
     push ebp
     mov ebp, esp
@@ -1194,6 +1173,7 @@ _memcmp:
 
 # int strlen(const char* str)
 _fundamental_strlen:
+fundamental_strlen:
 _strlen:
     push ebp
     mov ebp, esp
@@ -1223,6 +1203,7 @@ _strlen:
 
 # char* strcpy(char* dest, const char* src)
 _fundamental_strcpy:
+fundamental_strcpy:
 _strcpy:
     push ebp
     mov ebp, esp
@@ -1253,6 +1234,7 @@ _strcpy:
 
 # char* strncpy(char* dest, const char* src, int n)
 _fundamental_strncpy:
+fundamental_strncpy:
 _strncpy:
     push ebp
     mov ebp, esp
@@ -1298,6 +1280,7 @@ _strncpy:
 
 # char* strcat(char* dest, const char* src)
 _fundamental_strcat:
+fundamental_strcat:
 _strcat:
     push ebp
     mov ebp, esp
@@ -1334,6 +1317,7 @@ _strcat:
 
 # char* strncat(char* dest, const char* src, int n)
 _fundamental_strncat:
+fundamental_strncat:
 _strncat:
     push ebp
     mov ebp, esp
@@ -1381,6 +1365,7 @@ _strncat:
 
 # int strcmp(const char* s1, const char* s2)
 _fundamental_strcmp:
+fundamental_strcmp:
 _strcmp:
     push ebp
     mov ebp, esp
@@ -1433,6 +1418,7 @@ _strcmp:
 
 # int strncmp(const char* s1, const char* s2, int n)
 _fundamental_strncmp:
+fundamental_strncmp:
 _strncmp:
     push ebp
     mov ebp, esp
@@ -1475,6 +1461,7 @@ _strncmp:
 
 # char* strchr(const char* str, int c)
 _fundamental_strchr:
+fundamental_strchr:
 _strchr:
     push ebp
     mov ebp, esp
@@ -1507,6 +1494,7 @@ _strchr:
 
 # char* strrchr(const char* str, int c)
 _fundamental_strrchr:
+fundamental_strrchr:
 _strrchr:
     push ebp
     mov ebp, esp
@@ -1536,6 +1524,7 @@ _strrchr:
 
 # char* strstr(const char* haystack, const char* needle)
 _fundamental_strstr:
+fundamental_strstr:
 _strstr:
     push ebp
     mov ebp, esp
@@ -1592,6 +1581,7 @@ _strstr:
 
 # char* strdup(const char* src)
 _fundamental_strdup:
+fundamental_strdup:
 _strdup:
     push ebp
     mov ebp, esp
@@ -1634,6 +1624,7 @@ _strdup:
 # ========================================================
 
 _fundamental_is_digit:
+fundamental_is_digit:
 _is_digit:
     push ebp
     mov ebp, esp
@@ -1651,6 +1642,7 @@ _is_digit:
     ret
 
 _fundamental_is_alpha:
+fundamental_is_alpha:
 _is_alpha:
     push ebp
     mov ebp, esp
@@ -1674,6 +1666,7 @@ _is_alpha:
     ret
 
 _fundamental_is_alnum:
+fundamental_is_alnum:
 _is_alnum:
     push ebp
     mov ebp, esp
@@ -1690,6 +1683,7 @@ _is_alnum:
     ret
 
 _fundamental_is_space:
+fundamental_is_space:
 _is_space:
     push ebp
     mov ebp, esp
@@ -1715,6 +1709,7 @@ _is_space:
     ret
 
 _fundamental_is_upper:
+fundamental_is_upper:
 _is_upper:
     push ebp
     mov ebp, esp
@@ -1732,6 +1727,7 @@ _is_upper:
     ret
 
 _fundamental_is_lower:
+fundamental_is_lower:
 _is_lower:
     push ebp
     mov ebp, esp
@@ -1749,6 +1745,7 @@ _is_lower:
     ret
 
 _fundamental_is_xdigit:
+fundamental_is_xdigit:
 _is_xdigit:
     push ebp
     mov ebp, esp
@@ -1776,6 +1773,7 @@ _is_xdigit:
     ret
 
 _fundamental_to_upper:
+fundamental_to_upper:
 _to_upper:
     push ebp
     mov ebp, esp
@@ -1790,6 +1788,7 @@ _to_upper:
     ret
 
 _fundamental_to_lower:
+fundamental_to_lower:
 _to_lower:
     push ebp
     mov ebp, esp
@@ -1809,6 +1808,7 @@ _to_lower:
 
 # int atoi(const char* str)
 _fundamental_atoi:
+fundamental_atoi:
 _atoi:
     push ebp
     mov ebp, esp
@@ -1869,6 +1869,7 @@ _atoi:
 
 # char* itoa(int val, char* dest, int radix)
 _fundamental_itoa:
+fundamental_itoa:
 _itoa:
     push ebp
     mov ebp, esp
@@ -1946,6 +1947,7 @@ _itoa:
 
 # int htoi(const char* str)
 _fundamental_htoi:
+fundamental_htoi:
 _htoi:
     push ebp
     mov ebp, esp
@@ -2015,6 +2017,7 @@ _htoi:
 # ========================================================
 
 _fundamental_abs:
+fundamental_abs:
 _abs:
     push ebp
     mov ebp, esp
@@ -2026,6 +2029,7 @@ _abs:
     ret
 
 _fundamental_min:
+fundamental_min:
 _min:
     push ebp
     mov ebp, esp
@@ -2039,6 +2043,7 @@ _min:
     ret
 
 _fundamental_max:
+fundamental_max:
 _max:
     push ebp
     mov ebp, esp
@@ -2052,6 +2057,7 @@ _max:
     ret
 
 _fundamental_clamp:
+fundamental_clamp:
 _clamp:
     push ebp
     mov ebp, esp
@@ -2071,6 +2077,7 @@ _clamp:
     ret
 
 _fundamental_pow:
+fundamental_pow:
 _pow:
     push ebp
     mov ebp, esp
@@ -2102,6 +2109,7 @@ _pow:
     ret
 
 _fundamental_sqrt:
+fundamental_sqrt:
 _sqrt:
     push ebp
     mov ebp, esp
@@ -2147,6 +2155,7 @@ _sqrt:
     ret
 
 _fundamental_gcd:
+fundamental_gcd:
 _gcd:
     push ebp
     mov ebp, esp
@@ -2178,6 +2187,7 @@ _gcd:
     ret
 
 _fundamental_lcm:
+fundamental_lcm:
 _lcm:
     push ebp
     mov ebp, esp
@@ -2219,6 +2229,7 @@ _lcm:
     ret
 
 _fundamental_srand:
+fundamental_srand:
 _srand:
     push ebp
     mov ebp, esp
@@ -2228,6 +2239,7 @@ _srand:
     ret
 
 _fundamental_rand:
+fundamental_rand:
 _rand:
     push ebp
     mov ebp, esp
@@ -2245,26 +2257,55 @@ _rand:
 # ========================================================
 
 _fundamental_exit:
-_exit:
+fundamental_exit:
+fundamental_exit:
     push ebp
     mov ebp, esp
-    push dword ptr [ebp + 8]
-    call _ExitProcess@4
+    mov ebx, [ebp + 8]   # exit code
+    mov eax, 1          # sys_exit = 1
+    int 0x80
+    pop ebp
+    ret
 
 _fundamental_sleep:
-_sleep:
+fundamental_sleep:
+fundamental_sleep:
     push ebp
     mov ebp, esp
-    push dword ptr [ebp + 8]
-    call _Sleep@4
+    push ebx
+    push ecx
+    sub esp, 8          # struct timespec { long sec; long nsec; }
+    mov eax, [ebp + 8]  # ms
+    test eax, eax
+    jle .sleep_done
+    xor edx, edx
+    mov ecx, 1000
+    div ecx             # eax = sec, edx = rem_ms
+    mov [esp], eax
+    imul edx, 1000000
+    mov [esp + 4], edx
+    mov ebx, esp        # req
+    xor ecx, ecx        # rem = NULL
+    mov eax, 162        # sys_nanosleep = 162
+    int 0x80
+.sleep_done:
+    add esp, 8
+    pop ecx
+    pop ebx
     pop ebp
     ret
 
 _fundamental_get_tick_count:
-_get_tick_count:
+fundamental_get_tick_count:
+fundamental_get_tick_count:
 _fundamental_time:
-_time:
-    call _GetTickCount@0
+fundamental_time:
+fundamental_time:
+    push ebx
+    xor ebx, ebx        # time(NULL)
+    mov eax, 13         # sys_time = 13
+    int 0x80
+    pop ebx
     ret
 
 # ========================================================
@@ -2272,6 +2313,7 @@ _time:
 # ========================================================
 
 _fundamental_putchar:
+fundamental_putchar:
 _putchar:
     push ebp
     mov ebp, esp
@@ -2285,6 +2327,7 @@ _putchar:
     ret
 
 _fundamental_getchar:
+fundamental_getchar:
 _getchar:
     push ebp
     mov ebp, esp
@@ -2302,123 +2345,113 @@ _getchar:
 # 8. MODULO DE ARCHIVOS NATIVO WIN32 (kernel32)
 # ========================================================
 
-# int file_exists(const char* path)
+# int file_exists(const char* path) (Linux sys_access syscall 33)
+.globl fundamental_file_exists
+.globl _fundamental_file_exists
+.globl fundamental_file_exists
+fundamental_file_exists:
 _fundamental_file_exists:
-_file_exists:
+fundamental_file_exists:
     push ebp
     mov ebp, esp
-    mov eax, [ebp + 8]
-    test eax, eax
+    push ebx
+    mov ebx, [ebp + 8]
+    test ebx, ebx
     jz .fe_false
-
-    push eax
-    call _GetFileAttributesA@4
-    cmp eax, -1
-    je .fe_false
+    xor ecx, ecx        # F_OK = 0
+    mov eax, 33         # sys_access
+    int 0x80
+    test eax, eax
+    jnz .fe_false
     mov eax, 1
+    pop ebx
     pop ebp
     ret
 .fe_false:
     xor eax, eax
+    pop ebx
     pop ebp
     ret
 
-# int file_size(const char* path)
+# int file_size(const char* path) (Linux sys_open/sys_lseek/sys_close)
+.globl fundamental_file_size
+.globl _fundamental_file_size
+.globl fundamental_file_size
+fundamental_file_size:
 _fundamental_file_size:
-_file_size:
+fundamental_file_size:
     push ebp
     mov ebp, esp
     push ebx
-
-    mov eax, [ebp + 8]
-    test eax, eax
+    mov ebx, [ebp + 8]
+    test ebx, ebx
     jz .fs_err
-
-    push 0
-    push 0x80
-    push 3                  # OPEN_EXISTING
-    push 0
-    push 1                  # FILE_SHARE_READ
-    push 0x80000000         # GENERIC_READ
-    push eax
-    call _CreateFileA@28
-
-    cmp eax, -1
-    je .fs_err
-    mov ebx, eax
-
-    push 0
-    push ebx
-    call _GetFileSize@8
-
-    push eax
-    push ebx
-    call _CloseHandle@4
-    pop eax
-    jmp .fs_done
-
+    xor ecx, ecx        # O_RDONLY = 0
+    xor edx, edx
+    mov eax, 5          # sys_open = 5
+    int 0x80
+    test eax, eax
+    js .fs_err
+    mov ebx, eax        # ebx = fd
+    xor ecx, ecx        # offset = 0
+    mov edx, 2          # SEEK_END = 2
+    mov eax, 19         # sys_lseek = 19
+    int 0x80
+    push eax            # save size
+    mov eax, 6          # sys_close = 6
+    int 0x80
+    pop eax             # restore size
+    pop ebx
+    pop ebp
+    ret
 .fs_err:
     mov eax, -1
-.fs_done:
     pop ebx
     pop ebp
     ret
 
 # int file_read_all(const char* path, char* buffer, int max_len)
+.globl fundamental_file_read_all
+.globl _fundamental_file_read_all
+.globl fundamental_file_read_all
+fundamental_file_read_all:
 _fundamental_file_read_all:
-_file_read_all:
+fundamental_file_read_all:
     push ebp
     mov ebp, esp
     push ebx
     push esi
     push edi
-
-    mov esi, [ebp + 8]      # path
+    mov ebx, [ebp + 8]      # path
     mov edi, [ebp + 12]     # buffer
-    mov ecx, [ebp + 16]     # max_len
-
-    test esi, esi
+    mov edx, [ebp + 16]     # max_len
+    test ebx, ebx
     jz .fra_err
     test edi, edi
     jz .fra_err
-    cmp ecx, 1
+    cmp edx, 1
     jle .fra_err
-
-    dec ecx
-    mov [ebp + 16], ecx
-
-    push 0
-    push 0x80
-    push 3                  # OPEN_EXISTING
-    push 0
-    push 1                  # FILE_SHARE_READ
-    push 0x80000000         # GENERIC_READ
-    push esi
-    call _CreateFileA@28
-
-    cmp eax, -1
-    je .fra_err
-    mov ebx, eax
-
-    push 0
-    push offset bytes_rw
-    push dword ptr [ebp + 16]
-    push edi
-    push ebx
-    call _ReadFile@20
-
-    push eax
-    push ebx
-    call _CloseHandle@4
-    pop eax
-
+    dec edx
+    push edx
+    xor ecx, ecx            # O_RDONLY = 0
+    xor edx, edx
+    mov eax, 5              # sys_open
+    int 0x80
+    pop edx
     test eax, eax
-    jz .fra_err
-
-    mov eax, [bytes_rw]
+    js .fra_err
+    mov ebx, eax            # fd
+    mov ecx, edi            # buffer
+    mov eax, 3              # sys_read
+    int 0x80
+    push eax                # bytes read
+    mov eax, 6              # sys_close
+    int 0x80
+    pop eax
+    test eax, eax
+    js .fra_err
     mov byte ptr [edi + eax], 0
     jmp .fra_done
-
 .fra_err:
     mov eax, -1
 .fra_done:
@@ -2429,58 +2462,43 @@ _file_read_all:
     ret
 
 # int file_write_all(const char* path, const char* content)
+.globl fundamental_file_write_all
+.globl _fundamental_file_write_all
+.globl fundamental_file_write_all
+fundamental_file_write_all:
 _fundamental_file_write_all:
-_file_write_all:
+fundamental_file_write_all:
     push ebp
     mov ebp, esp
     push ebx
     push esi
     push edi
-
-    mov esi, [ebp + 8]      # path
-    mov edi, [ebp + 12]     # content
-
+    mov ebx, [ebp + 8]      # path
+    mov esi, [ebp + 12]     # content
+    test ebx, ebx
+    jz .fwa_err
     test esi, esi
     jz .fwa_err
-    test edi, edi
-    jz .fwa_err
-
-    push edi
-    call _fundamental_strlen
-    add esp, 4
-    mov edi, eax            # EDI = content length (callee-saved)
-
-    push 0
-    push 0x80
-    push 2                  # CREATE_ALWAYS
-    push 0
-    push 0
-    push 0x40000000         # GENERIC_WRITE
     push esi
-    call _CreateFileA@28
-
-    cmp eax, -1
-    je .fwa_err
-    mov ebx, eax
-
-    push 0
-    push offset bytes_rw
-    push edi                # longitud preservada
-    push dword ptr [ebp + 12] # content
-    push ebx
-    call _WriteFile@20
-
-    push eax
-    push ebx
-    call _CloseHandle@4
-    pop eax
-
+    call fundamental_strlen
+    add esp, 4
+    mov edi, eax            # length
+    mov ecx, 577            # O_WRONLY | O_CREAT | O_TRUNC = 01101 = 577
+    mov edx, 0666           # mode
+    mov eax, 5              # sys_open
+    int 0x80
     test eax, eax
-    jz .fwa_err
-
-    mov eax, [bytes_rw]
+    js .fwa_err
+    mov ebx, eax            # fd
+    mov ecx, esi            # content
+    mov edx, edi            # length
+    mov eax, 4              # sys_write
+    int 0x80
+    push eax
+    mov eax, 6              # sys_close
+    int 0x80
+    pop eax
     jmp .fwa_done
-
 .fwa_err:
     mov eax, -1
 .fwa_done:
@@ -2491,65 +2509,43 @@ _file_write_all:
     ret
 
 # int file_append(const char* path, const char* content)
+.globl fundamental_file_append
+.globl _fundamental_file_append
+.globl fundamental_file_append
+fundamental_file_append:
 _fundamental_file_append:
-_file_append:
+fundamental_file_append:
     push ebp
     mov ebp, esp
     push ebx
     push esi
     push edi
-
-    mov esi, [ebp + 8]      # path
-    mov edi, [ebp + 12]     # content
-
+    mov ebx, [ebp + 8]      # path
+    mov esi, [ebp + 12]     # content
+    test ebx, ebx
+    jz .fap_err
     test esi, esi
     jz .fap_err
-    test edi, edi
-    jz .fap_err
-
-    push edi
-    call _fundamental_strlen
-    add esp, 4
-    mov edi, eax            # EDI = content length (callee-saved)
-
-    push 0
-    push 0x80
-    push 4                  # OPEN_ALWAYS
-    push 0
-    push 0
-    push 0x40000000         # GENERIC_WRITE
     push esi
-    call _CreateFileA@28
-
-    cmp eax, -1
-    je .fap_err
-    mov ebx, eax
-
-    # SetFilePointer(hFile, 0, NULL, FILE_END (2))
-    push 2                  # FILE_END
-    push 0
-    push 0
-    push ebx
-    call _SetFilePointer@16
-
-    push 0
-    push offset bytes_rw
-    push edi                # longitud preservada
-    push dword ptr [ebp + 12] # content
-    push ebx
-    call _WriteFile@20
-
-    push eax
-    push ebx
-    call _CloseHandle@4
-    pop eax
-
+    call fundamental_strlen
+    add esp, 4
+    mov edi, eax            # length
+    mov ecx, 1089           # O_WRONLY | O_CREAT | O_APPEND = 02101 = 1089
+    mov edx, 0666           # mode
+    mov eax, 5              # sys_open
+    int 0x80
     test eax, eax
-    jz .fap_err
-
-    mov eax, [bytes_rw]
+    js .fap_err
+    mov ebx, eax            # fd
+    mov ecx, esi            # content
+    mov edx, edi            # length
+    mov eax, 4              # sys_write
+    int 0x80
+    push eax
+    mov eax, 6              # sys_close
+    int 0x80
+    pop eax
     jmp .fap_done
-
 .fap_err:
     mov eax, -1
 .fap_done:
@@ -2560,30 +2556,38 @@ _file_append:
     ret
 
 # int file_remove(const char* path)
+.globl fundamental_file_remove
+.globl _fundamental_file_remove
+.globl fundamental_file_remove
+fundamental_file_remove:
 _fundamental_file_remove:
-_file_remove:
+fundamental_file_remove:
     push ebp
     mov ebp, esp
-    mov eax, [ebp + 8]
-    test eax, eax
+    push ebx
+    mov ebx, [ebp + 8]
+    test ebx, ebx
     jz .frm_err
-
-    push eax
-    call _DeleteFileA@4
+    mov eax, 10         # sys_unlink = 10
+    int 0x80
     test eax, eax
-    jz .frm_err
+    jnz .frm_err
     mov eax, 1
+    pop ebx
     pop ebp
     ret
 .frm_err:
     xor eax, eax
+    pop ebx
     pop ebp
     ret
 
 # int char_at(const char* str, int index)
 .globl _fundamental_char_at
+.globl fundamental_char_at
 .globl _char_at
 _fundamental_char_at:
+fundamental_char_at:
 _char_at:
     push ebp
     mov ebp, esp
@@ -2601,8 +2605,10 @@ _char_at:
 
 # void set_char_at(char* str, int index, int ch)
 .globl _fundamental_set_char_at
+.globl fundamental_set_char_at
 .globl _set_char_at
 _fundamental_set_char_at:
+fundamental_set_char_at:
 _set_char_at:
     push ebp
     mov ebp, esp

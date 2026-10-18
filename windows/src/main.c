@@ -758,17 +758,36 @@ int main(int argc, char* argv[]) {
             int disc_count = get_discovered_source_count();
             for (int d = 0; d < disc_count; d++) {
                 const char* disc = get_discovered_source(d);
-                int already = 0;
-                for (int k = 0; k < source_file_count; k++) {
-                    if (strcmp(source_files[k], disc) == 0) {
-                        already = 1;
-                        break;
+                const char* dot = strrchr(disc, '.');
+                if (dot != NULL && (strcmp(dot, ".c") == 0 || strcmp(dot, ".cpp") == 0 ||
+                                    strcmp(dot, ".cc") == 0 || strcmp(dot, ".o") == 0 ||
+                                    strcmp(dot, ".a") == 0 || strcmp(dot, ".obj") == 0 ||
+                                    strcmp(dot, ".lib") == 0)) {
+                    int already = 0;
+                    for (int k = 0; k < extra_c_file_count; k++) {
+                        if (strcmp(extra_c_files[k], disc) == 0) {
+                            already = 1;
+                            break;
+                        }
                     }
-                }
-                if (!already && source_file_count < 64) {
-                    strncpy(source_files[source_file_count], disc, 511);
-                    source_files[source_file_count][511] = '\0';
-                    source_file_count++;
+                    if (!already && extra_c_file_count < 64) {
+                        strncpy(extra_c_files[extra_c_file_count], disc, 511);
+                        extra_c_files[extra_c_file_count][511] = '\0';
+                        extra_c_file_count++;
+                    }
+                } else {
+                    int already = 0;
+                    for (int k = 0; k < source_file_count; k++) {
+                        if (strcmp(source_files[k], disc) == 0) {
+                            already = 1;
+                            break;
+                        }
+                    }
+                    if (!already && source_file_count < 64) {
+                        strncpy(source_files[source_file_count], disc, 511);
+                        source_files[source_file_count][511] = '\0';
+                        source_file_count++;
+                    }
                 }
             }
             free(sc);
@@ -841,7 +860,7 @@ int main(int argc, char* argv[]) {
             generate_code(a, out_asm);
             int opts = generator_get_peephole_optimizations_count();
             if (opts > 0 && opt_level >= 1) {
-                printf("[Itsuki Optimizer] Optimizador por mirilla aplico %d optimizaciones.\n", opts);
+                printf("[itsuki optimizar] Se aplicaron optimizaciones a tu code\n");
             }
             printf("[Itsuki] Codigo ensamblador %s generado: %s\n", generator_get_target_bits() == 64 ? "x86_64" : "x86", out_asm);
             free(sc);
@@ -857,6 +876,7 @@ int main(int argc, char* argv[]) {
 
     char tmp_asm_files[64][512];
     int asm_count = 0;
+    int total_opts = 0;
 
     generator_set_opt_level(opt_level);
 
@@ -886,11 +906,16 @@ int main(int argc, char* argv[]) {
         generator_set_context(source_files[i], sc);
         generate_code(a, tmp_asm_files[asm_count]);
         int opts = generator_get_peephole_optimizations_count();
-        if (opts > 0 && opt_level >= 1) {
-            printf("[Itsuki Optimizer] Optimizador por mirilla aplico %d optimizaciones en %s.\n", opts, source_files[i]);
+        if (opts > 0) {
+            total_opts += opts;
         }
         free(sc);
         asm_count++;
+    }
+
+    if (total_opts > 0 && opt_level >= 1) {
+        printf("[itsuki optimizar] Se aplicaron optimizaciones a tu code\n");
+        fflush(stdout);
     }
 
     char target_exe[512];
@@ -942,7 +967,7 @@ int main(int argc, char* argv[]) {
         pos += snprintf(gcc_cmd + pos, sizeof(gcc_cmd) - pos, " %s", opt_flag);
     }
 #ifdef _WIN32
-    pos += snprintf(gcc_cmd + pos, sizeof(gcc_cmd) - pos, " \"%s\" -o \"%s\" -s -Wl,--gc-sections -lkernel32 -lm", runtime_path, target_exe);
+    pos += snprintf(gcc_cmd + pos, sizeof(gcc_cmd) - pos, " \"%s\" -o \"%s\" -s -Wl,--gc-sections -lkernel32 -lws2_32 -lm", runtime_path, target_exe);
 #else
     pos += snprintf(gcc_cmd + pos, sizeof(gcc_cmd) - pos, " \"%s\" -o \"%s\" -s -Wl,--gc-sections -lm", runtime_path, target_exe);
 #endif

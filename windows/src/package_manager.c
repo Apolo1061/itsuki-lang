@@ -199,6 +199,29 @@ int pkg_find_companion_source(const char* header_path, char* out_su_path, size_t
         }
     }
 
+    // Probar si el companero era .c o .cpp
+    char c_cand[2048];
+    strncpy(c_cand, header_path, sizeof(c_cand) - 1);
+    c_cand[sizeof(c_cand) - 1] = '\0';
+    normalize_slashes(c_cand);
+    char* ext_ptr = strstr(c_cand, ".huki");
+    if (!ext_ptr) ext_ptr = strstr(c_cand, ".hu");
+    if (!ext_ptr) ext_ptr = strstr(c_cand, ".h");
+    if (ext_ptr) {
+        strcpy(ext_ptr, ".c");
+        if (file_exists(c_cand)) {
+            strncpy(out_su_path, c_cand, max_len - 1);
+            out_su_path[max_len - 1] = '\0';
+            return 1;
+        }
+        strcpy(ext_ptr, ".cpp");
+        if (file_exists(c_cand)) {
+            strncpy(out_su_path, c_cand, max_len - 1);
+            out_su_path[max_len - 1] = '\0';
+            return 1;
+        }
+    }
+
     // 2. Si estaba en include/, buscar en src/ o en el padre
     char alt_cand[2048];
     char* inc_sub = strstr(cand, "/include/");

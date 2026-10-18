@@ -16,28 +16,6 @@
 
 **Itsuki** es un lenguaje de programación compilado y de alto rendimiento que genera código ensamblador nativo **x86_64** y **x86_32**. Diseñado para ofrecer control de bajo nivel con gran claridad, incluye soporte para números de punto flotante (`float`, `double`) mediante SSE2, diagnósticos de error modernos estilo Rust/Clang, un optimizador por mirilla (peephole optimizer), runtime nativo autocontenido, preprocesador C completo, interoperabilidad directa con C/C++ y un **gestor de paquetes integrado** basado en GitHub.
 
----
-
-## Características Principales
-
-*  ⚡ **Generación Nativa Dual (x86_64 y x86_32)**: Genera ensamblador nativo puro tanto para arquitecturas de **64 bits** (`-m64`, registros `%rax`, `%rbp`, `%rsp`, convenciones de llamada System V AMD64 y Microsoft x64) como de **32 bits** (`-m32`).
-*  🎯 **Soporte para Números de Punto Flotante (`float`, `double`)**: Tipos flotantes de 32 bits (`float`) y 64 bits (`double`) procesados mediante hardware con instrucciones **SSE2** escalares (`movss`, `movsd`, `addss`, `subss`, `mulss`, `divss`, `ucomiss`, `ucomisd`), conversiones enteras y formateo directo en `print`/`println`.
-*  🎨 **Diagnósticos de Error Estilo Moderno (Rust / Clang)**: Mensajes estilizados en terminal con colores ANSI, visualización del archivo de origen, margen vertical `|`, marcador de columna exacta `^~~~` y sugerencias contextuales estructuradas (`= ayuda: ...`).
-*  🚀 **Optimizador de Ensamblador por Mirilla (Peephole Optimizer)**: Motor de optimización en múltiples pasadas que elimina instrucciones redundantes (`movl`/`movq`), simplifica operaciones aritméticas neutras (`add $0`, `imul $1`, `xor`), compacta saltos incondicionales y emite el conteo de mejoras aplicadas.
-*  🔍 **Detección Inteligente de Arquitectura**: Antes de instalarse, detecta si la PC es de **64 bits** (x86_64/AMD64) o **32 bits** (x86), verifica el compilador GCC (`-dumpmachine`, soporte multilib) y configura automáticamente los flags idóneos en `arch.conf`.
-*  🩺 **Comando de Diagnóstico (`itsuki doctor`)**: Analiza la arquitectura del sistema operativo, el toolchain GCC y el estado multilib en cualquier momento.
-*  📦 **Gestor de Paquetes Integrado**: Instala y actualiza librerías directamente desde GitHub con `itsuki install <url|usuario/repo>`.
-*  📂 **Sistema de Inclusión Diferenciado**:
-  * `<libreria.huki>`: Búsqueda estricta en el sistema (`~/.itsuki/packages/`) y librerías integradas.
-  * `"archivo.huki"`: Búsqueda local en el proyecto o ruta exacta especificada.
-  * *Descubrimiento automático*: Al incluir una cabecera `.huki`, su implementación compañera `.suki` se compila y enlaza automáticamente.
-*  🔗 **Interoperabilidad Nativa con C**: Llama a funciones de C, enlaza archivos `.c` directamente y utiliza encabezados C en tu proyecto sin wrappers complejos.
-*  🏛️ **Programación Estructurada y Orientada a Objetos**: Soporta funciones, punteros, arreglos, structs anidados, clases con herencia, constructores y métodos.
-*  ⚙️ **Preprocesador Potente**: Compatible con `#include`, `#import`, `#pragma once`, `#define` (con macros funcionales y variádicas) y directivas condicionales (`#if`, `#ifdef`, `#elif`, `#else`, `#endif`).
-*  💻 **Ensamblador en Línea**: Bloques `__asm__("...")` para optimizaciones críticas de hardware.
-
----
-
 ## 🚀 Instalación Rápida
 
 ### En Windows
@@ -163,7 +141,7 @@ fn main() -> int {
     var radio: float = 5.5;
     var area: float = calcular_area(radio);
     println("Area del circulo:");
-    println(area); // Soporte nativo de impresion en println y print
+    println(area);
     return 0;
 }
 ```
