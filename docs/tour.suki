@@ -1,0 +1,124 @@
+// tour.suki — recorrido por la sintaxis de Itsuki
+// Ejecutar con: itsuki run tour.suki
+
+#include <fundamental.huki>
+#include <string.huki>
+
+// ----- Constantes y typedefs a nivel global -----
+const LIMITE: int = 10;
+
+typedef int entero;
+
+// ----- Enum -----
+enum Estado {
+    INACTIVO = 0,
+    ACTIVO = 1,
+    PAUSA = 2
+};
+
+// ----- struct -----
+struct Punto {
+    var x: int;
+    var y: int;
+};
+
+// ----- Funciones -----
+fn sumar(a: int, b: int) -> int {
+    return a + b;
+}
+
+inline fn doble(x: int) -> int {
+    return x * 2;
+}
+
+fn abs_propio(n: int) -> int {
+    if (n < 0) { return -n; }
+    return n;
+}
+
+// ----- Namespace -----
+namespace demo {
+    fn saludar(nombre: char*) -> void {
+        printf("Hola, %s\n", nombre);
+    }
+}
+
+// ----- Templates -----
+template <typename T>
+struct Par {
+    var primero: T;
+    var segundo: T;
+};
+
+fn main() -> void {
+    // Variables
+    var a: int = 5;
+    var b = 7;                  // inferido
+    var pi: float = 3.14159f;
+    var letra: char = 'A';
+    var activo: bool = true;
+    var ptr: int* = &a;
+
+    // Arreglos
+    var nums: int[5];
+    for (var i: int = 0; i < 5; i++) {
+        nums[i] = i * i;
+    }
+
+    // Punteros
+    *ptr = 42;
+
+    // Condicionales
+    if (a > b) {
+        printf("a > b\n");
+    } else if (a == b) {
+        printf("a == b\n");
+    } else {
+        printf("a < b\n");
+    }
+
+    // Loops
+    while (a < LIMITE) {
+        a++;
+    }
+
+    do {
+        b--;
+    } while (b > 0);
+
+    // switch
+    switch (ACTIVO) {
+        case INACTIVO:
+            printf("inactivo\n");
+            break;
+        case ACTIVO:
+            printf("activo\n");
+            break;
+        default:
+            printf("otro estado\n");
+            break;
+    }
+
+    // Llamadas
+    printf("sumar=%d doble=%d abs=%d\n", sumar(a, b), doble(a), abs_propio(-3));
+    demo::saludar("Itsuki");
+
+    // struct
+    var p: struct Punto;
+    p.x = 1;
+    p.y = 2;
+
+    // Template instanciado
+    var par: Par<int>;
+    par.primero = 10;
+    par.segundo = 20;
+
+    // String dinámico de la librería estándar
+    var s: struct String* = string_from("itsuki");
+    string_append(s, "!");
+    printf("%s (longitud: %d)\n", string_c_str(s), string_length(s));
+    string_free(s);
+
+    // Ensamblador en línea
+    __asm__ ("nop");
+}
