@@ -1,0 +1,64 @@
+#pragma once
+
+#include <fundamental.huki>
+
+struct String {
+    char* buffer;
+    int length;
+    int capacity;
+};
+
+fn string_new() -> struct String*;
+fn string_from(src: char*) -> struct String*;
+fn string_from_int(val: int) -> struct String*;
+fn string_free(s: struct String*) -> void;
+fn string_init(s: struct String*, initial_cap: int) -> void;
+fn string_destroy(s: struct String*) -> void;
+
+fn string_append(s: struct String*, text: char*) -> void;
+fn string_append_char(s: struct String*, c: int) -> void;
+fn string_append_n(s: struct String*, text: char*, n: int) -> void;
+fn string_append_int(s: struct String*, val: int) -> void;
+fn string_append_str(s: struct String*, other: struct String*) -> void;
+fn string_clear(s: struct String*) -> void;
+fn string_set(s: struct String*, text: char*) -> void;
+
+fn string_length(s: struct String*) -> int;
+fn string_capacity(s: struct String*) -> int;
+fn string_c_str(s: struct String*) -> char*;
+fn string_get(s: struct String*, idx: int) -> int;
+fn string_set_char(s: struct String*, idx: int, c: int) -> void;
+fn string_equals(s1: struct String*, s2: struct String*) -> int;
+fn string_equals_c_str(s: struct String*, text: char*) -> int;
+fn string_clone(s: struct String*) -> struct String*;
+
+fn str_concat(s1: char*, s2: char*) -> char*;
+fn str_repeat(s: char*, count: int) -> char*;
+fn str_copy(s: char*) -> char*;
+
+fn str_substring(src: char*, start: int, len: int) -> char*;
+fn str_slice(src: char*, start: int, end: int) -> char*;
+
+fn str_contains(haystack: char*, needle: char*) -> int;
+fn str_starts_with(str: char*, prefix: char*) -> int;
+fn str_ends_with(str: char*, suffix: char*) -> int;
+fn str_index_of(haystack: char*, needle: char*) -> int;
+fn str_last_index_of(haystack: char*, c: int) -> int;
+fn str_count_char(str: char*, c: int) -> int;
+
+fn str_replace(src: char*, find: char*, replace_with: char*) -> char*;
+fn str_to_upper(src: char*) -> char*;
+fn str_to_lower(src: char*) -> char*;
+fn str_trim_left(src: char*) -> char*;
+fn str_trim_right(src: char*) -> char*;
+fn str_trim(src: char*) -> char*;
+fn str_reverse(src: char*) -> char*;
+fn str_pad_left(src: char*, total_len: int, pad_char: int) -> char*;
+fn str_pad_right(src: char*, total_len: int, pad_char: int) -> char*;
+
+fn str_compare(s1: char*, s2: char*) -> int;
+fn str_compare_ignore_case(s1: char*, s2: char*) -> int;
+fn str_is_empty(s: char*) -> int;
+
+fn str_from_int(num: int) -> char*;
+fn str_to_int(s: char*) -> int;

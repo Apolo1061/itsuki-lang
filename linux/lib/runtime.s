@@ -2621,3 +2621,49 @@ _set_char_at:
 .set_char_at_done:
     pop ebp
     ret
+
+# ========================================================
+# Manejo de Saltos No Locales (setjmp / longjmp) para Itsuki x86
+# ========================================================
+.globl _itsuki_setjmp
+.globl itsuki_setjmp
+.globl _setjmp
+.globl setjmp
+_itsuki_setjmp:
+itsuki_setjmp:
+_setjmp:
+setjmp:
+    mov edx, [esp + 4]    # puntero a jmp_buf
+    mov [edx + 0],  ebx   # guardar ebx
+    mov [edx + 4],  esi   # guardar esi
+    mov [edx + 8],  edi   # guardar edi
+    mov [edx + 12], ebp   # guardar ebp
+    lea ecx, [esp + 4]    # esp del llamador tras retorno
+    mov [edx + 16], ecx   # guardar esp
+    mov ecx, [esp]        # direccion de retorno (eip)
+    mov [edx + 20], ecx   # guardar eip
+    xor eax, eax          # retorno 0 en llamada inicial
+    ret
+
+.globl _itsuki_longjmp
+.globl itsuki_longjmp
+.globl _longjmp
+.globl longjmp
+_itsuki_longjmp:
+itsuki_longjmp:
+_longjmp:
+longjmp:
+    mov edx, [esp + 4]    # puntero a jmp_buf
+    mov eax, [esp + 8]    # valor de retorno (val)
+    test eax, eax
+    jnz .itsuki_longjmp_ok
+    mov eax, 1            # si val == 0, por estandar retorna 1
+.itsuki_longjmp_ok:
+    mov ebx, [edx + 0]    # restaurar ebx
+    mov esi, [edx + 4]    # restaurar esi
+    mov edi, [edx + 8]    # restaurar edi
+    mov ebp, [edx + 12]   # restaurar ebp
+    mov esp, [edx + 16]   # restaurar esp del llamador
+    mov ecx, [edx + 20]   # recuperar eip
+    jmp ecx               # saltar al llamador
+

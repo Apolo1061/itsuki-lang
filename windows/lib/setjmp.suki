@@ -1,0 +1,51 @@
+#pragma once
+
+#include "setjmp.huki"
+
+namespace setjmp {
+
+    fn try_init(ctx: struct TryContext*) -> void {
+        if (ctx == 0) { return; }
+        ctx->error_code = 0;
+        ctx->error_message = 0;
+    }
+
+    fn try_throw(ctx: struct TryContext*, error_code: int, msg: char*) -> void {
+        if (ctx == 0) { return; }
+        if (error_code == 0) {
+            error_code = 1;
+        }
+        ctx->error_code = error_code;
+        ctx->error_message = msg;
+        itsuki_longjmp(&ctx->env, error_code);
+    }
+
+    fn try_get_code(ctx: struct TryContext*) -> int {
+        if (ctx == 0) { return 0; }
+        return ctx->error_code;
+    }
+
+    fn try_get_message(ctx: struct TryContext*) -> char* {
+        if (ctx == 0 || ctx->error_message == 0) {
+            return "";
+        }
+        return ctx->error_message;
+    }
+}
+
+// Wrappers globales para facil acceso
+fn try_init(ctx: struct TryContext*) -> void {
+    setjmp::try_init(ctx);
+}
+
+fn try_throw(ctx: struct TryContext*, error_code: int, msg: char*) -> void {
+    setjmp::try_throw(ctx, error_code, msg);
+}
+
+fn try_get_code(ctx: struct TryContext*) -> int {
+    return setjmp::try_get_code(ctx);
+}
+
+fn try_get_message(ctx: struct TryContext*) -> char* {
+    return setjmp::try_get_message(ctx);
+}

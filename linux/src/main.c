@@ -1,8 +1,11 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include "arena.h"
 #include "lexer.h"
 #include "parser.h"
+#include "semantics.h"
+#include "optimizer.h"
 #include "generator.h"
 #include "preprocessor.h"
 #include "embedded_lib.h"
@@ -11,9 +14,11 @@
 #include "diagnostics.h"
 
 #ifdef _WIN32
+#include <io.h>
 __declspec(dllimport) unsigned long __stdcall GetModuleFileNameA(void* hModule, char* lpFilename, unsigned long nSize);
 #else
 #include <unistd.h>
+#include <dirent.h>
 #endif
 
 void print_indent(int level) {
@@ -226,6 +231,14 @@ void print_ast(ASTNode* node, int level) {
                 printf("[Continue]\n");
                 break;
 
+            case AST_GOTO:
+                printf("[Goto] %s\n", node->name ? node->name : "");
+                break;
+
+            case AST_LABEL:
+                printf("[Label] %s:\n", node->name ? node->name : "");
+                break;
+
             case AST_SWITCH:
                 printf("[Switch]\n");
                 print_indent(level + 1);
@@ -385,16 +398,113 @@ static char* load_and_preprocess_file(const char* filepath) {
     return sc;
 }
 
+typedef struct {
+    char name[128];
+    int is_void;
+} TestFuncInfo;
+
+static int collect_test_functions(ASTNode* root, TestFuncInfo* out_funcs, int max_funcs) {
+    int count = 0;
+    if (!root) return 0;
+    ASTNode* curr = (root->type == AST_PROGRAM) ? root->children : root;
+    while (curr) {
+        if (curr->type == AST_FUNCTION_DECLARATION && curr->name) {
+            if (strncmp(curr->name, "test_", 5) == 0 || strncmp(curr->name, "test", 4) == 0) {
+                if (count < max_funcs) {
+                    strncpy(out_funcs[count].name, curr->name, 127);
+                    out_funcs[count].name[127] = '\0';
+                    out_funcs[count].is_void = (curr->type_name && strcmp(curr->type_name, "void") == 0);
+                    count++;
+                }
+            }
+        }
+        curr = curr->next;
+    }
+    return count;
+}
+
+static void rename_user_main(ASTNode* root) {
+    if (!root) return;
+    ASTNode* curr = (root->type == AST_PROGRAM) ? root->children : root;
+    while (curr) {
+        if (curr->type == AST_FUNCTION_DECLARATION && curr->name && strcmp(curr->name, "main") == 0) {
+            curr->name = c_strdup("__user_main");
+        }
+        curr = curr->next;
+    }
+}
+
+static void discover_test_files(char out_files[64][512], int* out_count) {
+    FILE* f = fopen("test.suki", "rb");
+    if (f) {
+        fclose(f);
+        if (*out_count < 64) {
+            strncpy(out_files[(*out_count)++], "test.suki", 511);
+        }
+    }
 #ifdef _WIN32
-#define ITSUKI_VERSION "5.0.0 (Native x86_32 Win32)"
+    struct _finddata_t c_file;
+    intptr_t hFile = _findfirst("*_test.suki", &c_file);
+    if (hFile != -1L) {
+        do {
+            int already = 0;
+            for (int i = 0; i < *out_count; i++) {
+                if (strcmp(out_files[i], c_file.name) == 0) { already = 1; break; }
+            }
+            if (!already && *out_count < 64) {
+                strncpy(out_files[(*out_count)++], c_file.name, 511);
+            }
+        } while (_findnext(hFile, &c_file) == 0);
+        _findclose(hFile);
+    }
+    hFile = _findfirst("test_*.suki", &c_file);
+    if (hFile != -1L) {
+        do {
+            int already = 0;
+            for (int i = 0; i < *out_count; i++) {
+                if (strcmp(out_files[i], c_file.name) == 0) { already = 1; break; }
+            }
+            if (!already && *out_count < 64) {
+                strncpy(out_files[(*out_count)++], c_file.name, 511);
+            }
+        } while (_findnext(hFile, &c_file) == 0);
+        _findclose(hFile);
+    }
 #else
-#define ITSUKI_VERSION "5.0.0 (Native Linux x86)"
+    DIR* dir = opendir(".");
+    if (dir) {
+        struct dirent* entry;
+        while ((entry = readdir(dir)) != NULL) {
+            size_t len = strlen(entry->d_name);
+            if (len > 5 && strcmp(entry->d_name + len - 5, ".suki") == 0) {
+                if (strncmp(entry->d_name, "test", 4) == 0 ||
+                    (len > 10 && strcmp(entry->d_name + len - 10, "_test.suki") == 0)) {
+                    int already = 0;
+                    for (int i = 0; i < *out_count; i++) {
+                        if (strcmp(out_files[i], entry->d_name) == 0) { already = 1; break; }
+                    }
+                    if (!already && *out_count < 64) {
+                        strncpy(out_files[(*out_count)++], entry->d_name, 511);
+                    }
+                }
+            }
+        }
+        closedir(dir);
+    }
+#endif
+}
+
+#ifdef _WIN32
+#define ITSUKI_VERSION "5.5.0 (Native x86_64/x86 Win32)"
+#else
+#define ITSUKI_VERSION "5.5.0 (Native Linux x86_64/x86)"
 #endif
 
 static void print_banner(void) {
     const ArchConfig* arch = arch_get_current();
-    printf("  Itsuki Programming Language - Compiler v%s [%s %d-bit -> Target x86_32]\n",
-           ITSUKI_VERSION, arch->host_arch, arch->os_bits);
+    printf("  Itsuki Programming Language - Compiler v%s [%s %d-bit -> Target %s]\n",
+           ITSUKI_VERSION, arch->host_arch, arch->os_bits,
+           generator_get_target_bits() == 64 ? "x86_64" : "x86_32");
 }
 
 static void print_help(const char* prog_name) {
@@ -402,8 +512,9 @@ static void print_help(const char* prog_name) {
     printf("\nUso: %s [comando] <archivo.suki|huki...> [opciones]\n\n", prog_name);
     printf("Comandos de Compilacion:\n");
     printf("  run   <archivos...>         Compila, enlaza con runtime nativo y ejecuta directamente\n");
+    printf("  test  [archivos...]         Ejecuta el runner de pruebas integrado (busca funciones test_*)\n");
     printf("  build <archivos...> [-o exe] Compila multiples archivos .suki/.huki y genera un ejecutable nativo\n");
-    printf("  asm   <archivos...> [-o asm] Genera el codigo fuente ensamblador x86\n");
+    printf("  asm   <archivos...> [-o asm] Genera el codigo fuente ensamblador x86/x86_64\n");
     printf("  ast   <archivos...>         Muestra el Arbol de Sintaxis Abstracta (AST)\n");
     printf("  cpp   <archivos...>         Ejecuta el preprocesador de C y muestra el codigo resultante\n\n");
     printf("Comandos de Gestor de Paquetes (Librerias Git/GitHub):\n");
@@ -415,6 +526,8 @@ static void print_help(const char* prog_name) {
     printf("Opciones:\n");
     printf("  -E                          Ejecuta solo el preprocesador (equivalente al comando 'cpp')\n");
     printf("  -D<macro>[=valor]           Define una macro para el preprocesador\n");
+    printf("  -m64                        Activa generacion de codigo nativo de 64 bits (x86_64 ABI)\n");
+    printf("  -m32                        Activa generacion de codigo de 32 bits (x86 cdecl)\n");
     printf("  -l<lib>                     Enlaza bibliotecas de C/Windows (ej: -lws2_32, -lwinmm, -lm)\n");
     printf("  -L<dir>                     Agrega directorio de busqueda de bibliotecas\n");
     printf("  -I<dir>                     Agrega directorio de busqueda de cabeceras\n");
@@ -584,6 +697,8 @@ static int resolve_source_file(const char* raw, char* resolved, size_t max_len) 
 }
 
 int main(int argc, char* argv[]) {
+    compiler_arena_init();
+    atexit(compiler_arena_free);
     diag_init();
     arch_init();
 
@@ -632,7 +747,8 @@ int main(int argc, char* argv[]) {
 
     if (strcmp(argv[1], "run") == 0 || strcmp(argv[1], "build") == 0 ||
         strcmp(argv[1], "asm") == 0 || strcmp(argv[1], "ast") == 0 ||
-        strcmp(argv[1], "cpp") == 0 || strcmp(argv[1], "-E") == 0) {
+        strcmp(argv[1], "cpp") == 0 || strcmp(argv[1], "-E") == 0 ||
+        strcmp(argv[1], "test") == 0) {
         command = argv[1];
         file_arg_idx = 2;
     }
@@ -737,12 +853,21 @@ int main(int argc, char* argv[]) {
         }
     }
 
+    if (strcmp(command, "test") == 0 && source_file_count == 0) {
+        discover_test_files(source_files, &source_file_count);
+    }
+
     if (source_file_count == 0) {
-        printf("itsuki: fatal error: no input files\ncompilation terminated.\n");
+        if (strcmp(command, "test") == 0) {
+            printf("[Itsuki Test Error] No se encontraron archivos de prueba (*_test.suki, test_*.suki, test.suki).\n");
+        } else {
+            printf("itsuki: fatal error: no input files\ncompilation terminated.\n");
+        }
         return 1;
     }
 
     // Escanear recursivamente archivos fuente companeros (.suki) descubiertos a traves de .huki incluidos
+    diag_suppress_warnings(1);
     int scanned_idx = 0;
     while (scanned_idx < source_file_count) {
         clear_discovered_sources();
@@ -794,6 +919,7 @@ int main(int argc, char* argv[]) {
         }
         scanned_idx++;
     }
+    diag_suppress_warnings(0);
 
     if (strcmp(command, "cpp") == 0 || strcmp(command, "-E") == 0) {
         for (int i = 0; i < source_file_count; i++) {
@@ -824,9 +950,16 @@ int main(int argc, char* argv[]) {
             Parser* p = init_parser(l);
             parser_set_context(p, source_files[i], sc);
             ASTNode* a = parser_parse(p);
-            if (!a) {
+            if (!a || parser_get_error_count(p) > 0) {
                 free(sc);
                 return 1;
+            }
+            if (!semantics_check(a, source_files[i], sc)) {
+                free(sc);
+                return 1;
+            }
+            if (opt_level >= 1) {
+                a = optimize_ast(a);
             }
             printf("--- AST (%s) ---\n", source_files[i]);
             print_ast(a, 0);
@@ -851,9 +984,16 @@ int main(int argc, char* argv[]) {
             Parser* p = init_parser(l);
             parser_set_context(p, source_files[i], sc);
             ASTNode* a = parser_parse(p);
-            if (!a) {
+            if (!a || parser_get_error_count(p) > 0) {
                 free(sc);
                 return 1;
+            }
+            if (!semantics_check(a, source_files[i], sc)) {
+                free(sc);
+                return 1;
+            }
+            if (opt_level >= 1) {
+                a = optimize_ast(a);
             }
             generator_set_opt_level(opt_level);
             generator_set_context(source_files[i], sc);
@@ -880,6 +1020,9 @@ int main(int argc, char* argv[]) {
 
     generator_set_opt_level(opt_level);
 
+    TestFuncInfo all_test_funcs[256];
+    int total_test_funcs = 0;
+
     for (int i = 0; i < source_file_count; i++) {
         // Si el archivo es un .huki/.hu solo sin implementaciones y hay mas archivos, omitir ensamble
         if ((strstr(source_files[i], ".huki") != NULL || strstr(source_files[i], ".hu") != NULL) && source_file_count > 1) {
@@ -899,10 +1042,103 @@ int main(int argc, char* argv[]) {
         Parser* p = init_parser(l);
         parser_set_context(p, source_files[i], sc);
         ASTNode* a = parser_parse(p);
-        if (!a) {
+        if (!a || parser_get_error_count(p) > 0) {
             free(sc);
             return 1;
         }
+
+        if (strcmp(command, "test") == 0) {
+            total_test_funcs += collect_test_functions(a, all_test_funcs + total_test_funcs, 256 - total_test_funcs);
+            rename_user_main(a);
+
+            if (i == source_file_count - 1) {
+                if (total_test_funcs == 0) {
+                    printf("[Itsuki Test] No se encontraron funciones de prueba (deben comenzar con 'test_' o 'test').\n");
+                    free(sc);
+                    return 1;
+                }
+
+                char harness[16384];
+                int hpos = 0;
+                hpos += snprintf(harness + hpos, sizeof(harness) - hpos,
+                    "#include <fundamental.huki>\n\n"
+                    "fn __itsuki_test_runner() -> int {\n"
+                    "    println(\"\");\n"
+                    "    println(\"====================================================\");\n"
+                    "    println(\"           ITSUKI INTEGRATED TEST RUNNER            \");\n"
+                    "    println(\"====================================================\");\n"
+                    "    var total: int = 0;\n"
+                    "    var passed: int = 0;\n"
+                    "    var failed: int = 0;\n\n");
+
+                for (int k = 0; k < total_test_funcs; k++) {
+                    if (all_test_funcs[k].is_void) {
+                        hpos += snprintf(harness + hpos, sizeof(harness) - hpos,
+                            "    total = total + 1;\n"
+                            "    print(\"  [TEST] %s ... \");\n"
+                            "    %s();\n"
+                            "    println(\"PASSED [OK]\");\n"
+                            "    passed = passed + 1;\n\n",
+                            all_test_funcs[k].name, all_test_funcs[k].name);
+                    } else {
+                        hpos += snprintf(harness + hpos, sizeof(harness) - hpos,
+                            "    total = total + 1;\n"
+                            "    print(\"  [TEST] %s ... \");\n"
+                            "    var r_%d: int = %s();\n"
+                            "    if (r_%d == 0) {\n"
+                            "        println(\"PASSED [OK]\");\n"
+                            "        passed = passed + 1;\n"
+                            "    } else {\n"
+                            "        println(\"FAILED [X]\");\n"
+                            "        failed = failed + 1;\n"
+                            "    }\n\n",
+                            all_test_funcs[k].name, k, all_test_funcs[k].name, k);
+                    }
+                }
+
+                hpos += snprintf(harness + hpos, sizeof(harness) - hpos,
+                    "    println(\"----------------------------------------------------\");\n"
+                    "    println(f\"  Resumen: {passed} pasados, {failed} fallidos de {total} total\");\n"
+                    "    if (failed == 0) {\n"
+                    "        println(\"  Estado:  TODOS LOS TESTS PASARON EXITOSAMENTE [OK]\");\n"
+                    "    } else {\n"
+                    "        println(\"  Estado:  HUBO FALLOS EN LA SUITE DE TESTS [FALLO]\");\n"
+                    "    }\n"
+                    "    println(\"====================================================\\n\");\n"
+                    "    if (failed > 0) { return 1; }\n"
+                    "    return 0;\n"
+                    "}\n\n"
+                    "fn main() -> int {\n"
+                    "    return __itsuki_test_runner();\n"
+                    "}\n");
+
+                Lexer* hl = init_lexer(harness);
+                Parser* hp = init_parser(hl);
+                parser_set_context(hp, "<test_runner>", harness);
+                ASTNode* ha = parser_parse(hp);
+                if (ha && ha->children) {
+                    if (a->children == NULL) {
+                        a->children = ha->children;
+                    } else {
+                        ASTNode* last = a->children;
+                        while (last->next) last = last->next;
+                        last->next = ha->children;
+                    }
+                }
+            }
+        }
+
+        // Semantics Check Pass
+        if (!semantics_check(a, source_files[i], sc)) {
+            free(sc);
+            return 1;
+        }
+
+        // AST-Level Optimization Pass (Constant Folding & Dead Code Elimination)
+        if (opt_level >= 1) {
+            a = optimize_ast(a);
+        }
+
         generator_set_context(source_files[i], sc);
         generate_code(a, tmp_asm_files[asm_count]);
         int opts = generator_get_peephole_optimizations_count();
@@ -967,7 +1203,7 @@ int main(int argc, char* argv[]) {
         pos += snprintf(gcc_cmd + pos, sizeof(gcc_cmd) - pos, " %s", opt_flag);
     }
 #ifdef _WIN32
-    pos += snprintf(gcc_cmd + pos, sizeof(gcc_cmd) - pos, " \"%s\" -o \"%s\" -s -Wl,--gc-sections -lkernel32 -lm", runtime_path, target_exe);
+    pos += snprintf(gcc_cmd + pos, sizeof(gcc_cmd) - pos, " \"%s\" -o \"%s\" -s -Wl,--gc-sections -lkernel32 -lws2_32 -lm", runtime_path, target_exe);
 #else
     pos += snprintf(gcc_cmd + pos, sizeof(gcc_cmd) - pos, " \"%s\" -o \"%s\" -s -Wl,--gc-sections -lm", runtime_path, target_exe);
 #endif
@@ -995,7 +1231,7 @@ int main(int argc, char* argv[]) {
         return 0;
     }
 
-    if (strcmp(command, "run") == 0) {
+    if (strcmp(command, "run") == 0 || strcmp(command, "test") == 0) {
         char run_cmd[1024];
 #ifdef _WIN32
         snprintf(run_cmd, sizeof(run_cmd), ".\\\"%s\"", target_exe);

@@ -7,9 +7,9 @@ typedef enum {
     TOKEN_NUMBER,
     TOKEN_FLOAT_LITERAL,
     TOKEN_STRING,
+    TOKEN_INTERPOLATED_STRING,
 
     // Palabras clave y directivas
-    TOKEN_IMPORT,      // #import
     TOKEN_INCLUDE,     // #include
     TOKEN_NAMESPACE,   // namespace
     TOKEN_USING,       // using
@@ -61,6 +61,9 @@ typedef enum {
     TOKEN_TEMPLATE,    // template
     TOKEN_TYPENAME,    // typename
     TOKEN_C_CODE,      // __c__, __c_code__, c_code
+    TOKEN_GOTO,        // goto
+    TOKEN_SIZEOF,      // sizeof
+    TOKEN_AUTO,        // auto
 
     // Operadores y símbolos
     TOKEN_COLON_COLON, // ::

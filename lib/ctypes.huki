@@ -1,0 +1,90 @@
+#pragma once
+
+#include <fundamental.huki>
+
+namespace ctypes {
+
+    // Constantes de clasificacion y limites ASCII
+    const int EOF = -1;
+    const int ASCII_MIN = 0;
+    const int ASCII_MAX = 127;
+
+    // --- Funciones de Clasificacion de Caracteres (Convencion Itsuki: snake_case) ---
+    fn is_alnum(c: int) -> int;
+    fn is_alpha(c: int) -> int;
+    fn is_lower(c: int) -> int;
+    fn is_upper(c: int) -> int;
+    fn is_digit(c: int) -> int;
+    fn is_xdigit(c: int) -> int;
+    fn is_octdigit(c: int) -> int;
+    fn is_binary(c: int) -> int;
+    fn is_cntrl(c: int) -> int;
+    fn is_graph(c: int) -> int;
+    fn is_space(c: int) -> int;
+    fn is_blank(c: int) -> int;
+    fn is_print(c: int) -> int;
+    fn is_punct(c: int) -> int;
+    fn is_ascii(c: int) -> int;
+    fn is_vowel(c: int) -> int;
+    fn is_consonant(c: int) -> int;
+
+    // --- Funciones de Conversion y Manipulacion de Caracteres ---
+    fn to_lower(c: int) -> int;
+    fn to_upper(c: int) -> int;
+    fn to_ascii(c: int) -> int;
+    fn toggle_case(c: int) -> int;
+    fn digit_to_int(c: int) -> int;
+    fn xdigit_to_int(c: int) -> int;
+    fn int_to_digit(val: int) -> int;
+    fn int_to_xdigit(val: int, uppercase: int) -> int;
+
+    // --- Alias clasicos compatibles con C (ctype.h) ---
+    fn isalnum(c: int) -> int;
+    fn isalpha(c: int) -> int;
+    fn islower(c: int) -> int;
+    fn isupper(c: int) -> int;
+    fn isdigit(c: int) -> int;
+    fn isxdigit(c: int) -> int;
+    fn iscntrl(c: int) -> int;
+    fn isgraph(c: int) -> int;
+    fn isspace(c: int) -> int;
+    fn isblank(c: int) -> int;
+    fn isprint(c: int) -> int;
+    fn ispunct(c: int) -> int;
+    fn isascii(c: int) -> int;
+    fn tolower(c: int) -> int;
+    fn toupper(c: int) -> int;
+    fn toascii(c: int) -> int;
+
+    // --- Predicados y utilidades para Cadenas (Adaptado a Itsuki) ---
+    fn str_is_alpha(s: char*) -> int;
+    fn str_is_digit(s: char*) -> int;
+    fn str_is_alnum(s: char*) -> int;
+    fn str_is_xdigit(s: char*) -> int;
+    fn str_is_space(s: char*) -> int;
+    fn str_is_lower(s: char*) -> int;
+    fn str_is_upper(s: char*) -> int;
+    fn str_is_ascii(s: char*) -> int;
+
+    fn str_count_digits(s: char*) -> int;
+    fn str_count_alpha(s: char*) -> int;
+    fn str_count_spaces(s: char*) -> int;
+}
+
+// Wrappers globales para acceso directo sin 'using namespace'
+fn isalnum(c: int) -> int;
+fn isalpha(c: int) -> int;
+fn islower(c: int) -> int;
+fn isupper(c: int) -> int;
+fn isdigit(c: int) -> int;
+fn isxdigit(c: int) -> int;
+fn iscntrl(c: int) -> int;
+fn isgraph(c: int) -> int;
+fn isspace(c: int) -> int;
+fn isblank(c: int) -> int;
+fn isprint(c: int) -> int;
+fn ispunct(c: int) -> int;
+fn isascii(c: int) -> int;
+fn tolower(c: int) -> int;
+fn toupper(c: int) -> int;
+fn toascii(c: int) -> int;

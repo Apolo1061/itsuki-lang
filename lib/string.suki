@@ -1,0 +1,470 @@
+#pragma once
+
+#include "string.huki"
+
+using namespace fundamental;
+
+fn string_init(s: struct String*, initial_cap: int) -> void {
+    if (s == 0) { return; }
+    if (initial_cap <= 0) {
+        initial_cap = 16;
+    }
+    s->buffer = malloc(initial_cap);
+    if (s->buffer != 0) {
+        s->buffer[0] = 0;
+    }
+    s->length = 0;
+    s->capacity = initial_cap;
+}
+
+fn string_new() -> struct String* {
+    var s: struct String* = malloc(12);
+    if (s != 0) {
+        string_init(s, 16);
+    }
+    return s;
+}
+
+fn string_from(src: char*) -> struct String* {
+    var s: struct String* = string_new();
+    if (s != 0 && src != 0) {
+        string_append(s, src);
+    }
+    return s;
+}
+
+fn string_from_int(val: int) -> struct String* {
+    var s: struct String* = string_new();
+    if (s != 0) {
+        string_append_int(s, val);
+    }
+    return s;
+}
+
+fn string_destroy(s: struct String*) -> void {
+    if (s == 0) { return; }
+    if (s->buffer != 0) {
+        free(s->buffer);
+        s->buffer = 0;
+    }
+    s->length = 0;
+    s->capacity = 0;
+}
+
+fn string_free(s: struct String*) -> void {
+    if (s == 0) { return; }
+    string_destroy(s);
+    free(s);
+}
+
+fn string_append_n(s: struct String*, text: char*, n: int) -> void {
+    if (s == 0 || text == 0 || n <= 0) { return; }
+
+    int needed = s->length + n + 1;
+    if (needed > s->capacity) {
+        int new_cap = s->capacity * 2;
+        if (new_cap < needed) {
+            new_cap = needed + 16;
+        }
+        char* new_buf = realloc(s->buffer, new_cap);
+        if (new_buf == 0) { return; }
+        s->buffer = new_buf;
+        s->capacity = new_cap;
+    }
+
+    memcpy(s->buffer + s->length, text, n);
+    s->length = s->length + n;
+    s->buffer[s->length] = 0;
+}
+
+fn string_append(s: struct String*, text: char*) -> void {
+    if (s == 0 || text == 0) { return; }
+    int text_len = strlen(text);
+    string_append_n(s, text, text_len);
+}
+
+fn string_append_char(s: struct String*, c: int) -> void {
+    if (s == 0) { return; }
+    int needed = s->length + 2;
+    if (needed > s->capacity) {
+        int new_cap = s->capacity * 2;
+        if (new_cap < needed) {
+            new_cap = needed + 16;
+        }
+        char* new_buf = realloc(s->buffer, new_cap);
+        if (new_buf == 0) { return; }
+        s->buffer = new_buf;
+        s->capacity = new_cap;
+    }
+    s->buffer[s->length] = c;
+    s->length++;
+    s->buffer[s->length] = 0;
+}
+
+fn string_append_int(s: struct String*, val: int) -> void {
+    char num_buf[32];
+    itoa(val, num_buf, 10);
+    string_append(s, num_buf);
+}
+
+fn string_append_str(s: struct String*, other: struct String*) -> void {
+    if (s == 0 || other == 0) { return; }
+    if (other->length > 0 && other->buffer != 0) {
+        string_append(s, other->buffer);
+    }
+}
+
+fn string_clear(s: struct String*) -> void {
+    if (s == 0) { return; }
+    s->length = 0;
+    if (s->buffer != 0) {
+        s->buffer[0] = 0;
+    }
+}
+
+fn string_set(s: struct String*, text: char*) -> void {
+    if (s == 0) { return; }
+    string_clear(s);
+    if (text != 0) {
+        string_append(s, text);
+    }
+}
+
+fn string_length(s: struct String*) -> int {
+    if (s == 0) { return 0; }
+    return s->length;
+}
+
+fn string_capacity(s: struct String*) -> int {
+    if (s == 0) { return 0; }
+    return s->capacity;
+}
+
+fn string_c_str(s: struct String*) -> char* {
+    if (s == 0 || s->buffer == 0) {
+        return "";
+    }
+    return s->buffer;
+}
+
+fn string_get(s: struct String*, idx: int) -> int {
+    if (s == 0 || s->buffer == 0 || idx < 0 || idx >= s->length) {
+        return 0;
+    }
+    return s->buffer[idx];
+}
+
+fn string_set_char(s: struct String*, idx: int, c: int) -> void {
+    if (s == 0 || s->buffer == 0 || idx < 0 || idx >= s->length) {
+        return;
+    }
+    s->buffer[idx] = c;
+}
+
+fn string_equals(s1: struct String*, s2: struct String*) -> int {
+    if (s1 == s2) { return 1; }
+    if (s1 == 0 || s2 == 0) { return 0; }
+    if (s1->length != s2->length) { return 0; }
+    return strcmp(s1->buffer, s2->buffer) == 0;
+}
+
+fn string_equals_c_str(s: struct String*, text: char*) -> int {
+    if (s == 0 && text == 0) { return 1; }
+    if (s == 0 || text == 0 || s->buffer == 0) { return 0; }
+    return strcmp(s->buffer, text) == 0;
+}
+
+fn string_clone(s: struct String*) -> struct String* {
+    if (s == 0) { return 0; }
+    var clone: struct String* = string_new();
+    if (clone != 0 && s->buffer != 0) {
+        string_append(clone, s->buffer);
+    }
+    return clone;
+}
+
+fn str_copy(s: char*) -> char* {
+    if (s == 0) { return 0; }
+    return strdup(s);
+}
+
+fn str_concat(s1: char*, s2: char*) -> char* {
+    int len1 = 0;
+    int len2 = 0;
+    if (s1 != 0) { len1 = strlen(s1); }
+    if (s2 != 0) { len2 = strlen(s2); }
+    char* result = malloc(len1 + len2 + 1);
+    if (result == 0) { return 0; }
+    if (s1 != 0 && len1 > 0) { memcpy(result, s1, len1); }
+    if (s2 != 0 && len2 > 0) { memcpy(result + len1, s2, len2); }
+    result[len1 + len2] = 0;
+    return result;
+}
+
+fn str_repeat(s: char*, count: int) -> char* {
+    if (s == 0 || count <= 0) {
+        char* empty = malloc(1);
+        empty[0] = 0;
+        return empty;
+    }
+    int len = strlen(s);
+    if (len <= 0) {
+        char* empty = malloc(1);
+        empty[0] = 0;
+        return empty;
+    }
+    char* result = malloc((len * count) + 1);
+    if (result == 0) { return 0; }
+    for (int i = 0; i < count; i++) {
+        memcpy(result + (i * len), s, len);
+    }
+    result[len * count] = 0;
+    return result;
+}
+
+fn str_substring(src: char*, start: int, len: int) -> char* {
+    if (src == 0 || len <= 0) {
+        char* empty = malloc(1);
+        empty[0] = 0;
+        return empty;
+    }
+    int src_len = strlen(src);
+    if (start < 0) { start = 0; }
+    if (start >= src_len) {
+        char* empty = malloc(1);
+        empty[0] = 0;
+        return empty;
+    }
+    if (start + len > src_len) {
+        len = src_len - start;
+    }
+    char* sub = malloc(len + 1);
+    if (sub == 0) { return 0; }
+    memcpy(sub, src + start, len);
+    sub[len] = 0;
+    return sub;
+}
+
+fn str_slice(src: char*, start: int, end: int) -> char* {
+    if (src == 0) {
+        char* empty = malloc(1);
+        empty[0] = 0;
+        return empty;
+    }
+    int src_len = strlen(src);
+    if (start < 0) { start = 0; }
+    if (end > src_len) { end = src_len; }
+    if (end <= start) {
+        char* empty = malloc(1);
+        empty[0] = 0;
+        return empty;
+    }
+    int len = end - start;
+    return str_substring(src, start, len);
+}
+
+fn str_contains(haystack: char*, needle: char*) -> int {
+    if (haystack == 0 || needle == 0) { return 0; }
+    return strstr(haystack, needle) != 0;
+}
+
+fn str_starts_with(str: char*, prefix: char*) -> int {
+    if (str == 0 || prefix == 0) { return 0; }
+    int plen = strlen(prefix);
+    int slen = strlen(str);
+    if (plen > slen) { return 0; }
+    return strncmp(str, prefix, plen) == 0;
+}
+
+fn str_ends_with(str: char*, suffix: char*) -> int {
+    if (str == 0 || suffix == 0) { return 0; }
+    int suflen = strlen(suffix);
+    int slen = strlen(str);
+    if (suflen > slen) { return 0; }
+    return strcmp(str + (slen - suflen), suffix) == 0;
+}
+
+fn str_index_of(haystack: char*, needle: char*) -> int {
+    if (haystack == 0 || needle == 0) { return -1; }
+    char* pos = strstr(haystack, needle);
+    if (pos == 0) { return -1; }
+    return pos - haystack;
+}
+
+fn str_last_index_of(haystack: char*, c: int) -> int {
+    if (haystack == 0) { return -1; }
+    char* pos = strrchr(haystack, c);
+    if (pos == 0) { return -1; }
+    return pos - haystack;
+}
+
+fn str_count_char(str: char*, c: int) -> int {
+    if (str == 0) { return 0; }
+    int count = 0;
+    int len = strlen(str);
+    for (int i = 0; i < len; i++) {
+        if (str[i] == c) {
+            count++;
+        }
+    }
+    return count;
+}
+
+fn str_replace(src: char*, find: char*, replace_with: char*) -> char* {
+    if (src == 0 || find == 0 || replace_with == 0) {
+        return str_copy(src);
+    }
+    int find_len = strlen(find);
+    if (find_len == 0) {
+        return str_copy(src);
+    }
+    int rep_len = strlen(replace_with);
+    int src_len = strlen(src);
+
+    var res: struct String* = string_new();
+    char* curr = src;
+    char* match = strstr(curr, find);
+    while (match != 0) {
+        int segment_len = match - curr;
+        if (segment_len > 0) {
+            string_append_n(res, curr, segment_len);
+        }
+        string_append(res, replace_with);
+        curr = match + find_len;
+        match = strstr(curr, find);
+    }
+    if (strlen(curr) > 0) {
+        string_append(res, curr);
+    }
+
+    char* final_str = str_copy(string_c_str(res));
+    string_free(res);
+    return final_str;
+}
+
+fn str_to_upper(src: char*) -> char* {
+    if (src == 0) { return 0; }
+    int len = strlen(src);
+    char* res = malloc(len + 1);
+    for (int i = 0; i < len; i++) {
+        res[i] = to_upper(src[i]);
+    }
+    res[len] = 0;
+    return res;
+}
+
+fn str_to_lower(src: char*) -> char* {
+    if (src == 0) { return 0; }
+    int len = strlen(src);
+    char* res = malloc(len + 1);
+    for (int i = 0; i < len; i++) {
+        res[i] = to_lower(src[i]);
+    }
+    res[len] = 0;
+    return res;
+}
+
+fn str_trim_left(src: char*) -> char* {
+    if (src == 0) { return 0; }
+    int i = 0;
+    while (src[i] != 0 && is_space(src[i])) {
+        i++;
+    }
+    return str_copy(src + i);
+}
+
+fn str_trim_right(src: char*) -> char* {
+    if (src == 0) { return 0; }
+    int len = strlen(src);
+    int i = len - 1;
+    while (i >= 0 && is_space(src[i])) {
+        i--;
+    }
+    return str_substring(src, 0, i + 1);
+}
+
+fn str_trim(src: char*) -> char* {
+    if (src == 0) { return 0; }
+    char* tl = str_trim_left(src);
+    char* res = str_trim_right(tl);
+    free(tl);
+    return res;
+}
+
+fn str_reverse(src: char*) -> char* {
+    if (src == 0) { return 0; }
+    int len = strlen(src);
+    char* res = malloc(len + 1);
+    for (int i = 0; i < len; i++) {
+        res[i] = src[len - 1 - i];
+    }
+    res[len] = 0;
+    return res;
+}
+
+fn str_pad_left(src: char*, total_len: int, pad_char: int) -> char* {
+    if (src == 0) { return 0; }
+    int len = strlen(src);
+    if (len >= total_len) {
+        return str_copy(src);
+    }
+    int pad_count = total_len - len;
+    char* res = malloc(total_len + 1);
+    memset(res, pad_char, pad_count);
+    memcpy(res + pad_count, src, len);
+    res[total_len] = 0;
+    return res;
+}
+
+fn str_pad_right(src: char*, total_len: int, pad_char: int) -> char* {
+    if (src == 0) { return 0; }
+    int len = strlen(src);
+    if (len >= total_len) {
+        return str_copy(src);
+    }
+    char* res = malloc(total_len + 1);
+    memcpy(res, src, len);
+    int pad_count = total_len - len;
+    memset(res + len, pad_char, pad_count);
+    res[total_len] = 0;
+    return res;
+}
+
+fn str_compare(s1: char*, s2: char*) -> int {
+    if (s1 == 0 && s2 == 0) { return 0; }
+    if (s1 == 0) { return -1; }
+    if (s2 == 0) { return 1; }
+    return strcmp(s1, s2);
+}
+
+fn str_compare_ignore_case(s1: char*, s2: char*) -> int {
+    if (s1 == 0 && s2 == 0) { return 0; }
+    if (s1 == 0) { return -1; }
+    if (s2 == 0) { return 1; }
+    int i = 0;
+    while (s1[i] != 0 && s2[i] != 0) {
+        int c1 = to_lower(s1[i]);
+        int c2 = to_lower(s2[i]);
+        if (c1 != c2) {
+            return c1 - c2;
+        }
+        i++;
+    }
+    return to_lower(s1[i]) - to_lower(s2[i]);
+}
+
+fn str_is_empty(s: char*) -> int {
+    if (s == 0) { return 1; }
+    return s[0] == 0;
+}
+
+fn str_from_int(num: int) -> char* {
+    char buf[32];
+    itoa(num, buf, 10);
+    return str_copy(buf);
+}
+
+fn str_to_int(s: char*) -> int {
+    if (s == 0) { return 0; }
+    return atoi(s);
+}

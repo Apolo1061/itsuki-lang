@@ -11,6 +11,8 @@ typedef enum {
 void diag_init(void);
 void diag_set_colors_enabled(int enabled);
 int diag_get_colors_enabled(void);
+void diag_suppress_warnings(int suppress);
+int diag_are_warnings_suppressed(void);
 
 void diag_report(DiagSeverity severity,
                  const char* filename,

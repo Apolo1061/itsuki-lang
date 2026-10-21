@@ -7,6 +7,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <stdio.h>
+#include <ctype.h>
 
 static const char* generator_current_filename = NULL;
 static const char* generator_current_source = NULL;
@@ -81,6 +82,9 @@ typedef struct Symbol {
     int is_64bit;
     int is_unsigned;
     char* asm_name;
+    int is_used;
+    int line;
+    int col;
     struct Symbol* next;
 } Symbol;
 
@@ -663,6 +667,7 @@ typedef struct StructDef {
 } StructDef;
 
 static StructDef* find_struct_def(const char* type_name);
+static int compute_type_size(const char* type_name);
 static void register_declared_functions(ASTNode* decl);
 static void generate_declarations(ASTNode* decl, FILE* out);
 
@@ -726,10 +731,15 @@ static void register_struct_node(ASTNode* s_node) {
             char* b = strchr(f->type_name, '[');
             int asz = atoi(b + 1);
             if (asz <= 0) asz = 1;
-            fsize = asz * 4;
+            char base_t[128];
+            int tlen = (int)(b - f->type_name);
+            if (tlen >= 127) tlen = 127;
+            strncpy(base_t, f->type_name, tlen);
+            base_t[tlen] = '\0';
+            int el_size = compute_type_size(base_t);
+            fsize = asz * (el_size > 0 ? el_size : 4);
         } else {
-            StructDef* sub_sd = find_struct_def(f->type_name);
-            if (sub_sd != NULL) fsize = sub_sd->total_size;
+            fsize = compute_type_size(f->type_name);
         }
         
         if (s_node->type == AST_UNION) {
@@ -1123,7 +1133,7 @@ static GlobalVar* find_global_var(const char* name) {
     return NULL;
 }
 
-static void add_symbol(const char* name, int offset, int is_param, const char* type_name, int is_string, int is_array, int array_size, int is_const) {
+static void add_symbol(const char* name, int offset, int is_param, const char* type_name, int is_string, int is_array, int array_size, int is_const, int line, int col) {
     Symbol* sym = malloc(sizeof(Symbol));
     sym->name = strdup(name);
     sym->stack_offset = offset;
@@ -1139,11 +1149,14 @@ static void add_symbol(const char* name, int offset, int is_param, const char* t
     sym->is_64bit = (type_name && (strcmp(type_name, "int64") == 0 || strcmp(type_name, "uint64") == 0 || strcmp(type_name, "long long") == 0 || (target_bits == 64 && strstr(type_name, "*") != NULL))) ? 1 : 0;
     sym->is_unsigned = (type_name && (strncmp(type_name, "uint", 4) == 0 || strstr(type_name, "unsigned") != NULL)) ? 1 : 0;
     sym->asm_name = NULL;
+    sym->is_used = 0;
+    sym->line = line;
+    sym->col = col;
     sym->next = current_symbols;
     current_symbols = sym;
 }
 
-static void add_static_symbol(const char* name, const char* asm_name, const char* type_name, int is_string, int is_array, int array_size, int is_const) {
+static void add_static_symbol(const char* name, const char* asm_name, const char* type_name, int is_string, int is_array, int array_size, int is_const, int line, int col) {
     Symbol* sym = malloc(sizeof(Symbol));
     sym->name = strdup(name);
     sym->stack_offset = 0;
@@ -1159,8 +1172,26 @@ static void add_static_symbol(const char* name, const char* asm_name, const char
     sym->is_64bit = (type_name && (strcmp(type_name, "int64") == 0 || strcmp(type_name, "uint64") == 0 || strcmp(type_name, "long long") == 0 || (target_bits == 64 && strstr(type_name, "*") != NULL))) ? 1 : 0;
     sym->is_unsigned = (type_name && (strncmp(type_name, "uint", 4) == 0 || strstr(type_name, "unsigned") != NULL)) ? 1 : 0;
     sym->asm_name = strdup(asm_name);
+    sym->is_used = 0;
+    sym->line = line;
+    sym->col = col;
     sym->next = current_symbols;
     current_symbols = sym;
+}
+
+static void check_unused_symbols(void) {
+    if (generator_current_filename && (strstr(generator_current_filename, "embedded:") != NULL || strstr(generator_current_filename, "fundamental.") != NULL)) {
+        return;
+    }
+    Symbol* curr = current_symbols;
+    while (curr != NULL) {
+        if (!curr->is_used && !curr->is_param && !curr->is_static && curr->name && curr->name[0] != '_') {
+            char msg[256];
+            snprintf(msg, sizeof(msg), "variable local '%s' declarada pero nunca utilizada", curr->name);
+            diag_warning(generator_current_filename, generator_current_source, curr->line, curr->col > 0 ? curr->col : 1, (int)strlen(curr->name), msg);
+        }
+        curr = curr->next;
+    }
 }
 
 static int is_float_expr(ASTNode* node);
@@ -1410,6 +1441,7 @@ static int is_string_expression(ASTNode* expr) {
 
 static int get_expression_element_size(ASTNode* node) {
     if (node == NULL) return 4;
+    if (node->type == AST_SIZEOF) return 4;
     if (node->type == AST_STRING) return 1;
     if (node->type == AST_IDENTIFIER) {
         Symbol* sym = find_symbol(node->name);
@@ -1475,6 +1507,7 @@ static void push_arg_efficiently(ASTNode* arg, FILE* out) {
         } else if (arg->type == AST_IDENTIFIER) {
             Symbol* sym = find_symbol(arg->name);
             if (sym != NULL) {
+                sym->is_used = 1;
                 if (sym->is_static && sym->asm_name != NULL) {
                     if (sym->is_string || sym->is_array) {
                         fprintf(out, "    leaq %s(%%rip), %%rax\n", sym->asm_name);
@@ -1536,6 +1569,7 @@ static void push_arg_efficiently(ASTNode* arg, FILE* out) {
     } else if (arg->type == AST_IDENTIFIER) {
         Symbol* sym = find_symbol(arg->name);
         if (sym != NULL) {
+            sym->is_used = 1;
             if (sym->is_static && sym->asm_name != NULL) {
                 if (sym->is_string || sym->is_array) {
                     fprintf(out, "    pushl $%s\n", sym->asm_name);
@@ -1665,6 +1699,74 @@ static DeclaredFunc* find_declared_func(const char* target_func) {
     }
     
     return NULL;
+}
+
+static int compute_type_size(const char* type_name) {
+    if (!type_name) return (target_bits == 64) ? 8 : 4;
+    while (strncmp(type_name, "const ", 6) == 0) type_name += 6;
+    while (*type_name && isspace((unsigned char)*type_name)) type_name++;
+    
+    if (strchr(type_name, '*') != NULL) {
+        return (target_bits == 64) ? 8 : 4;
+    }
+    if (strcmp(type_name, "char") == 0 || strcmp(type_name, "int8") == 0 ||
+        strcmp(type_name, "uint8") == 0 || strcmp(type_name, "bool") == 0) {
+        return 1;
+    }
+    if (strcmp(type_name, "int16") == 0 || strcmp(type_name, "uint16") == 0 ||
+        strcmp(type_name, "short") == 0) {
+        return 2;
+    }
+    if (strcmp(type_name, "int") == 0 || strcmp(type_name, "uint32") == 0 ||
+        strcmp(type_name, "int32") == 0 || strcmp(type_name, "float") == 0) {
+        return 4;
+    }
+    if (strcmp(type_name, "double") == 0 || strcmp(type_name, "int64") == 0 ||
+        strcmp(type_name, "uint64") == 0 || strcmp(type_name, "long long") == 0) {
+        return 8;
+    }
+    if (strcmp(type_name, "void") == 0) {
+        return 0;
+    }
+    StructDef* sd = find_struct_def(type_name);
+    if (sd != NULL) {
+        return sd->total_size > 0 ? sd->total_size : 4;
+    }
+    return 4;
+}
+
+static int compute_expr_size(ASTNode* expr) {
+    if (!expr) return 4;
+    if (expr->type == AST_NUMBER || expr->type == AST_BOOLEAN || expr->type == AST_SIZEOF) {
+        return 4;
+    }
+    if (expr->type == AST_FLOAT_LITERAL) {
+        return expr->is_float ? 4 : 8;
+    }
+    if (expr->type == AST_STRING) {
+        return (int)strlen(expr->string_value) + 1;
+    }
+    if (expr->type == AST_IDENTIFIER) {
+        Symbol* sym = find_symbol(expr->name);
+        if (sym != NULL) {
+            sym->is_used = 1;
+            if (sym->is_array && sym->array_size > 0) {
+                return sym->array_size * compute_type_size(sym->type_name);
+            }
+            return compute_type_size(sym->type_name);
+        }
+        GlobalVar* gv = find_global_var(expr->name);
+        if (gv != NULL) {
+            if (gv->is_array && gv->array_size > 0) {
+                return gv->array_size * compute_type_size(gv->type_name);
+            }
+            return compute_type_size(gv->type_name);
+        }
+    }
+    if (expr->type_name) {
+        return compute_type_size(expr->type_name);
+    }
+    return 4;
 }
 
 static int get_param_or_var_size(ASTNode* node) {
@@ -1837,7 +1939,7 @@ static void add_inlined_local_symbols(ASTNode* node, int* slot_offset) {
             int sz = get_param_or_var_size(node);
             *slot_offset += sz;
             int is_str = (node->type_name && strstr(node->type_name, "string") && !strchr(node->type_name, '*')) ? 1 : 0;
-            add_symbol(node->name, -(*slot_offset), 0, node->type_name, is_str, node->is_array, node->array_size, node->is_const);
+            add_symbol(node->name, -(*slot_offset), 0, node->type_name, is_str, node->is_array, node->array_size, node->is_const, node->line, node->column);
         } else if (node->type == AST_BLOCK) {
             add_inlined_local_symbols(node->statements, slot_offset);
         } else if (node->type == AST_IF) {
@@ -2128,7 +2230,13 @@ static void generate_call(ASTNode* node, FILE* out) {
         if (arg_count == 0) {
             if (is_println) {
                 if (target_bits == 64) {
+#ifdef _WIN32
+                    fprintf(out, "    subq $32, %%rsp\n");
                     fprintf(out, "    call fundamental_println_empty\n");
+                    fprintf(out, "    addq $32, %%rsp\n");
+#else
+                    fprintf(out, "    call fundamental_println_empty\n");
+#endif
                 } else {
 #if defined(__linux__) || defined(__ELF__)
                     fprintf(out, "    call fundamental_println_empty\n");
@@ -2140,18 +2248,94 @@ static void generate_call(ASTNode* node, FILE* out) {
             return;
         }
         for (int i = 0; i < arg_count; i++) {
+            if (arg_array[i]->type == AST_INTERPOLATED_STRING) {
+                ASTNode* part = arg_array[i]->children;
+                while (part) {
+                    if (is_any_float_expr(part)) {
+                        generate_expression(part, out);
+                        if (is_float_expr(part) && !is_double_expr(part)) {
+                            fprintf(out, "    cvtss2sd %%xmm0, %%xmm0\n");
+                        }
+                        if (target_bits == 64) {
+#ifdef _WIN32
+                            fprintf(out, "    subq $32, %%rsp\n");
+                            fprintf(out, "    call fundamental_print_float\n");
+                            fprintf(out, "    addq $32, %%rsp\n");
+#else
+                            fprintf(out, "    call fundamental_print_float\n");
+#endif
+                        } else {
+                            fprintf(out, "    subl $8, %%esp\n");
+                            fprintf(out, "    movsd %%xmm0, (%%esp)\n");
+#if defined(__linux__) || defined(__ELF__)
+                            fprintf(out, "    call fundamental_print_float\n");
+#else
+                            fprintf(out, "    call _fundamental_print_float\n");
+#endif
+                            fprintf(out, "    addl $8, %%esp\n");
+                        }
+                    } else if (is_string_expression(part) || part->type == AST_STRING) {
+                        if (target_bits == 64) {
+#ifdef _WIN32
+                            generate_expression(part, out);
+                            fprintf(out, "    movq %%rax, %%rcx\n");
+                            fprintf(out, "    subq $32, %%rsp\n");
+                            fprintf(out, "    call fundamental_print_str\n");
+                            fprintf(out, "    addq $32, %%rsp\n");
+#else
+                            generate_expression(part, out);
+                            fprintf(out, "    movq %%rax, %%rdi\n");
+                            fprintf(out, "    call fundamental_print_str\n");
+#endif
+                        } else {
+                            push_arg_efficiently(part, out);
+#if defined(__linux__) || defined(__ELF__)
+                            fprintf(out, "    call fundamental_print_str\n");
+#else
+                            fprintf(out, "    call _fundamental_print_str\n");
+#endif
+                            fprintf(out, "    addl $4, %%esp\n");
+                        }
+                    } else {
+                        if (target_bits == 64) {
+#ifdef _WIN32
+                            generate_expression(part, out);
+                            fprintf(out, "    movq %%rax, %%rcx\n");
+                            fprintf(out, "    subq $32, %%rsp\n");
+                            fprintf(out, "    call fundamental_print_int\n");
+                            fprintf(out, "    addq $32, %%rsp\n");
+#else
+                            generate_expression(part, out);
+                            fprintf(out, "    movq %%rax, %%rdi\n");
+                            fprintf(out, "    call fundamental_print_int\n");
+#endif
+                        } else {
+                            push_arg_efficiently(part, out);
+#if defined(__linux__) || defined(__ELF__)
+                            fprintf(out, "    call fundamental_print_int\n");
+#else
+                            fprintf(out, "    call _fundamental_print_int\n");
+#endif
+                            fprintf(out, "    addl $4, %%esp\n");
+                        }
+                    }
+                    part = part->next;
+                }
+                continue;
+            }
+
             if (is_any_float_expr(arg_array[i])) {
                 generate_expression(arg_array[i], out);
                 if (is_float_expr(arg_array[i]) && !is_double_expr(arg_array[i])) {
                     fprintf(out, "    cvtss2sd %%xmm0, %%xmm0\n");
                 }
                 if (target_bits == 64) {
-#if defined(__linux__) || defined(__ELF__)
-                    fprintf(out, "    call fundamental_print_float\n");
-#else
+#ifdef _WIN32
                     fprintf(out, "    subq $32, %%rsp\n");
                     fprintf(out, "    call fundamental_print_float\n");
                     fprintf(out, "    addq $32, %%rsp\n");
+#else
+                    fprintf(out, "    call fundamental_print_float\n");
 #endif
                 } else {
                     fprintf(out, "    subl $8, %%esp\n");
@@ -2163,39 +2347,61 @@ static void generate_call(ASTNode* node, FILE* out) {
 #endif
                     fprintf(out, "    addl $8, %%esp\n");
                 }
-            } else {
-                push_arg_efficiently(arg_array[i], out);
-                if (is_string_expression(arg_array[i])) {
-                    if (target_bits == 64) {
-                        fprintf(out, "    call fundamental_print_str\n");
-                    } else {
-#if defined(__linux__) || defined(__ELF__)
-                        fprintf(out, "    call fundamental_print_str\n");
-#else
-                        fprintf(out, "    call _fundamental_print_str\n");
-#endif
-                    }
-                } else {
-                    if (target_bits == 64) {
-                        fprintf(out, "    call fundamental_print_int\n");
-                    } else {
-#if defined(__linux__) || defined(__ELF__)
-                        fprintf(out, "    call fundamental_print_int\n");
-#else
-                        fprintf(out, "    call _fundamental_print_int\n");
-#endif
-                    }
-                }
+            } else if (is_string_expression(arg_array[i]) || arg_array[i]->type == AST_STRING) {
                 if (target_bits == 64) {
-                    fprintf(out, "    addq $8, %%rsp\n");
+#ifdef _WIN32
+                    generate_expression(arg_array[i], out);
+                    fprintf(out, "    movq %%rax, %%rcx\n");
+                    fprintf(out, "    subq $32, %%rsp\n");
+                    fprintf(out, "    call fundamental_print_str\n");
+                    fprintf(out, "    addq $32, %%rsp\n");
+#else
+                    generate_expression(arg_array[i], out);
+                    fprintf(out, "    movq %%rax, %%rdi\n");
+                    fprintf(out, "    call fundamental_print_str\n");
+#endif
                 } else {
+                    push_arg_efficiently(arg_array[i], out);
+#if defined(__linux__) || defined(__ELF__)
+                    fprintf(out, "    call fundamental_print_str\n");
+#else
+                    fprintf(out, "    call _fundamental_print_str\n");
+#endif
+                    fprintf(out, "    addl $4, %%esp\n");
+                }
+            } else {
+                if (target_bits == 64) {
+#ifdef _WIN32
+                    generate_expression(arg_array[i], out);
+                    fprintf(out, "    movq %%rax, %%rcx\n");
+                    fprintf(out, "    subq $32, %%rsp\n");
+                    fprintf(out, "    call fundamental_print_int\n");
+                    fprintf(out, "    addq $32, %%rsp\n");
+#else
+                    generate_expression(arg_array[i], out);
+                    fprintf(out, "    movq %%rax, %%rdi\n");
+                    fprintf(out, "    call fundamental_print_int\n");
+#endif
+                } else {
+                    push_arg_efficiently(arg_array[i], out);
+#if defined(__linux__) || defined(__ELF__)
+                    fprintf(out, "    call fundamental_print_int\n");
+#else
+                    fprintf(out, "    call _fundamental_print_int\n");
+#endif
                     fprintf(out, "    addl $4, %%esp\n");
                 }
             }
         }
         if (is_println) {
             if (target_bits == 64) {
+#ifdef _WIN32
+                fprintf(out, "    subq $32, %%rsp\n");
                 fprintf(out, "    call fundamental_println_empty\n");
+                fprintf(out, "    addq $32, %%rsp\n");
+#else
+                fprintf(out, "    call fundamental_println_empty\n");
+#endif
             } else {
 #if defined(__linux__) || defined(__ELF__)
                 fprintf(out, "    call fundamental_println_empty\n");
@@ -2353,7 +2559,7 @@ static void generate_call(ASTNode* node, FILE* out) {
             curr_slot += psz;
             int param_offset = -curr_slot;
             int is_str = (param->type_name && strstr(param->type_name, "string") && !strchr(param->type_name, '*')) ? 1 : 0;
-            add_symbol(param->name, param_offset, 1, param->type_name, is_str, 0, 0, param->is_const);
+            add_symbol(param->name, param_offset, 1, param->type_name, is_str, 0, 0, param->is_const, param->line, param->column);
             param = param->next;
         }
         
@@ -2399,8 +2605,15 @@ static void generate_call(ASTNode* node, FILE* out) {
     }
     
     // 4. Llamada regular a función normal (no inline o límite de recursión)
-    for (int i = arg_count - 1; i >= 0; i--) {
-        push_arg_efficiently(arg_array[i], out);
+    if (target_bits != 64) {
+        for (int i = arg_count - 1; i >= 0; i--) {
+            push_arg_efficiently(arg_array[i], out);
+        }
+    } else {
+        for (int i = 0; i < arg_count; i++) {
+            generate_expression(arg_array[i], out);
+            fprintf(out, "    pushq %%rax\n");
+        }
     }
     
     char asm_call_name[512];
@@ -2528,11 +2741,70 @@ static void generate_call(ASTNode* node, FILE* out) {
         }
     }
     
-    fprintf(out, "    call %s\n", asm_call_name);
-    if (arg_count > 0) {
-        if (target_bits == 64) {
-            fprintf(out, "    addq $%d, %%rsp\n", arg_count * 8);
-        } else {
+    if (target_bits == 64) {
+#ifdef _WIN32
+        // Microsoft x64 Calling Convention:
+        // Los primeros 4 argumentos van en RCX, RDX, R8, R9
+        if (arg_count >= 4) {
+            fprintf(out, "    popq %%r9\n");
+            fprintf(out, "    popq %%r8\n");
+            fprintf(out, "    popq %%rdx\n");
+            fprintf(out, "    popq %%rcx\n");
+        } else if (arg_count == 3) {
+            fprintf(out, "    popq %%r8\n");
+            fprintf(out, "    popq %%rdx\n");
+            fprintf(out, "    popq %%rcx\n");
+        } else if (arg_count == 2) {
+            fprintf(out, "    popq %%rdx\n");
+            fprintf(out, "    popq %%rcx\n");
+        } else if (arg_count == 1) {
+            fprintf(out, "    popq %%rcx\n");
+        }
+        // Shadow space obligatorio de 32 bytes en Windows x64
+        fprintf(out, "    subq $32, %%rsp\n");
+        fprintf(out, "    call %s\n", asm_call_name);
+        int stack_cleanup = 32 + (arg_count > 4 ? (arg_count - 4) * 8 : 0);
+        fprintf(out, "    addq $%d, %%rsp\n", stack_cleanup);
+#else
+        // System V AMD64 Calling Convention (Linux):
+        // Los primeros 6 argumentos van en RDI, RSI, RDX, RCX, R8, R9
+        if (arg_count >= 6) {
+            fprintf(out, "    popq %%r9\n");
+            fprintf(out, "    popq %%r8\n");
+            fprintf(out, "    popq %%rcx\n");
+            fprintf(out, "    popq %%rdx\n");
+            fprintf(out, "    popq %%rsi\n");
+            fprintf(out, "    popq %%rdi\n");
+        } else if (arg_count == 5) {
+            fprintf(out, "    popq %%r8\n");
+            fprintf(out, "    popq %%rcx\n");
+            fprintf(out, "    popq %%rdx\n");
+            fprintf(out, "    popq %%rsi\n");
+            fprintf(out, "    popq %%rdi\n");
+        } else if (arg_count == 4) {
+            fprintf(out, "    popq %%rcx\n");
+            fprintf(out, "    popq %%rdx\n");
+            fprintf(out, "    popq %%rsi\n");
+            fprintf(out, "    popq %%rdi\n");
+        } else if (arg_count == 3) {
+            fprintf(out, "    popq %%rdx\n");
+            fprintf(out, "    popq %%rsi\n");
+            fprintf(out, "    popq %%rdi\n");
+        } else if (arg_count == 2) {
+            fprintf(out, "    popq %%rsi\n");
+            fprintf(out, "    popq %%rdi\n");
+        } else if (arg_count == 1) {
+            fprintf(out, "    popq %%rdi\n");
+        }
+        fprintf(out, "    xorq %%rax, %%rax\n");
+        fprintf(out, "    call %s\n", asm_call_name);
+        if (arg_count > 6) {
+            fprintf(out, "    addq $%d, %%rsp\n", (arg_count - 6) * 8);
+        }
+#endif
+    } else {
+        fprintf(out, "    call %s\n", asm_call_name);
+        if (arg_count > 0) {
             fprintf(out, "    addl $%d, %%esp\n", arg_count * 4);
         }
     }
@@ -2609,6 +2881,7 @@ static void generate_expression(ASTNode* node, FILE* out) {
             Symbol* sym = find_symbol(node->name);
             const char* bp = (target_bits == 64) ? "rbp" : "ebp";
             if (sym != NULL) {
+                sym->is_used = 1;
                 if (sym->is_float) {
                     if (sym->is_static && sym->asm_name != NULL) {
                         fprintf(out, "    movss %s, %%xmm0\n", sym->asm_name);
@@ -3309,6 +3582,7 @@ static void generate_expression(ASTNode* node, FILE* out) {
                 if (node->left->type == AST_IDENTIFIER) {
                     Symbol* sym = find_symbol(node->left->name);
                     if (sym != NULL) {
+                        sym->is_used = 1;
                         if (sym->is_static && sym->asm_name != NULL) {
                             fprintf(out, "    leal %s, %%eax\n", sym->asm_name);
                         } else {
@@ -3806,6 +4080,21 @@ static void generate_expression(ASTNode* node, FILE* out) {
             break;
         }
             
+        case AST_SIZEOF: {
+            int sz = 4;
+            if (node->type_name != NULL) {
+                sz = compute_type_size(node->type_name);
+            } else if (node->expr != NULL) {
+                sz = compute_expr_size(node->expr);
+            }
+            if (target_bits == 64) {
+                fprintf(out, "    movq $%d, %%rax\n", sz);
+            } else {
+                fprintf(out, "    movl $%d, %%eax\n", sz);
+            }
+            break;
+        }
+
         case AST_CALL_EXPR:
             generate_call(node, out);
             break;
@@ -3974,6 +4263,23 @@ static void generate_condition_jump(ASTNode* cond, int jump_if_true, const char*
         fprintf(out, "    jnz %s\n", target_label);
     } else {
         fprintf(out, "    jz %s\n", target_label);
+    }
+}
+
+static void emit_user_label_name(char* buf, size_t max_len, const char* label_name) {
+    const char* ns = current_func_namespace ? current_func_namespace : "";
+    const char* fn = current_func_name ? current_func_name : "main";
+    char clean_prefix[256];
+    int ci = 0;
+    for (int i = 0; ns[i] != '\0' && ci < 240; i++) {
+        if (ns[i] == ':') clean_prefix[ci++] = '_';
+        else if (isalnum((unsigned char)ns[i]) || ns[i] == '_') clean_prefix[ci++] = ns[i];
+    }
+    clean_prefix[ci] = '\0';
+    if (ci > 0) {
+        snprintf(buf, max_len, ".Luser_lbl_%s_%s_%s", clean_prefix, fn, label_name);
+    } else {
+        snprintf(buf, max_len, ".Luser_lbl_%s_%s", fn, label_name);
     }
 }
 
@@ -4717,6 +5023,24 @@ static void generate_statement(ASTNode* node, FILE* out) {
             break;
         }
 
+        case AST_LABEL: {
+            if (node->name != NULL) {
+                char lbl[256];
+                emit_user_label_name(lbl, sizeof(lbl), node->name);
+                fprintf(out, "%s:\n", lbl);
+            }
+            break;
+        }
+
+        case AST_GOTO: {
+            if (node->name != NULL) {
+                char lbl[256];
+                emit_user_label_name(lbl, sizeof(lbl), node->name);
+                fprintf(out, "    jmp %s\n", lbl);
+            }
+            break;
+        }
+
         default:
             break;
     }
@@ -4763,7 +5087,7 @@ static void scan_local_variables(ASTNode* node, int* current_offset) {
                 slv->next = declared_static_locals;
                 declared_static_locals = slv;
                 
-                add_static_symbol(node->name, asm_lbl, node->type_name, is_str, is_arr, arr_sz, node->is_const);
+                add_static_symbol(node->name, asm_lbl, node->type_name, is_str, is_arr, arr_sz, node->is_const, node->line, node->column);
             } else {
                 StructDef* sd = find_struct_def(node->type_name);
                 int var_size = 4;
@@ -4780,7 +5104,7 @@ static void scan_local_variables(ASTNode* node, int* current_offset) {
                 }
                 *current_offset += var_size;
                 int offset = -(*current_offset);
-                add_symbol(node->name, offset, 0, node->type_name, is_str, is_arr, arr_sz, node->is_const);
+                add_symbol(node->name, offset, 0, node->type_name, is_str, is_arr, arr_sz, node->is_const, node->line, node->column);
             }
         } else if (node->type == AST_BLOCK) {
             scan_local_variables(node->statements, current_offset);
@@ -4913,7 +5237,7 @@ static void generate_function(ASTNode* node, FILE* out) {
         int base_off = (target_bits == 64) ? 16 : 8;
         int offset = base_off + (param_idx * slot_size);
         int is_str = (param->type_name && strstr(param->type_name, "string") != NULL && strchr(param->type_name, '*') == NULL) ? 1 : 0;
-        add_symbol(param->name, offset, 1, param->type_name, is_str, 0, 0, param->is_const);
+        add_symbol(param->name, offset, 1, param->type_name, is_str, 0, 0, param->is_const, param->line, param->column);
         param_idx++;
         param = param->next;
     }
@@ -4964,6 +5288,19 @@ static void generate_function(ASTNode* node, FILE* out) {
         fprintf(out, "    pushq %%rbp\n");
         fprintf(out, "    movq %%rsp, %%rbp\n");
         fprintf(out, "    subq $%d, %%rsp\n", stack_alloc);
+#ifdef _WIN32
+        fprintf(out, "    movq %%rcx, 16(%%rbp)\n");
+        fprintf(out, "    movq %%rdx, 24(%%rbp)\n");
+        fprintf(out, "    movq %%r8,  32(%%rbp)\n");
+        fprintf(out, "    movq %%r9,  40(%%rbp)\n");
+#else
+        fprintf(out, "    movq %%rdi, 16(%%rbp)\n");
+        fprintf(out, "    movq %%rsi, 24(%%rbp)\n");
+        fprintf(out, "    movq %%rdx, 32(%%rbp)\n");
+        fprintf(out, "    movq %%rcx, 40(%%rbp)\n");
+        fprintf(out, "    movq %%r8,  48(%%rbp)\n");
+        fprintf(out, "    movq %%r9,  56(%%rbp)\n");
+#endif
     } else {
         fprintf(out, "    pushl %%ebp\n");
         fprintf(out, "    movl %%esp, %%ebp\n");
@@ -4988,6 +5325,8 @@ static void generate_function(ASTNode* node, FILE* out) {
         }
         fprintf(out, "    ret\n");
     }
+    check_unused_symbols();
+    free_symbols();
     active_usings = saved_active_usings;
     active_using_symbols = saved_active_using_symbols;
     active_namespace_aliases = saved_active_namespace_aliases;

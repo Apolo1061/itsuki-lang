@@ -1,0 +1,325 @@
+#pragma once
+
+#include "math.huki"
+
+namespace math {
+
+    fn abs(x: int) -> int {
+        if (x < 0) {
+            return -x;
+        }
+        return x;
+    }
+
+    fn sign(x: int) -> int {
+        if (x > 0) { return 1; }
+        if (x < 0) { return -1; }
+        return 0;
+    }
+
+    fn min(a: int, b: int) -> int {
+        if (a < b) { return a; }
+        return b;
+    }
+
+    fn max(a: int, b: int) -> int {
+        if (a > b) { return a; }
+        return b;
+    }
+
+    fn min3(a: int, b: int, c: int) -> int {
+        return min(min(a, b), c);
+    }
+
+    fn max3(a: int, b: int, c: int) -> int {
+        return max(max(a, b), c);
+    }
+
+    fn clamp(val: int, min_val: int, max_val: int) -> int {
+        if (val < min_val) { return min_val; }
+        if (val > max_val) { return max_val; }
+        return val;
+    }
+
+    fn lerp(a: int, b: int, t_percent: int) -> int {
+        return a + ((b - a) * t_percent) / 100;
+    }
+
+    fn map_range(val: int, in_min: int, in_max: int, out_min: int, out_max: int) -> int {
+        if (in_max == in_min) { return out_min; }
+        return out_min + ((val - in_min) * (out_max - out_min)) / (in_max - in_min);
+    }
+
+    fn pow(base: int, exp: int) -> int {
+        if (exp < 0) { return 0; }
+        if (exp == 0) { return 1; }
+        int res = 1;
+        int b = base;
+        int e = exp;
+        while (e > 0) {
+            if (e % 2 == 1) {
+                res = res * b;
+            }
+            b = b * b;
+            e = e / 2;
+        }
+        return res;
+    }
+
+    fn sqrt(x: int) -> int {
+        if (x <= 0) { return 0; }
+        if (x <= 3) { return 1; }
+        int r = x / 2;
+        while (r > x / r) {
+            r = (r + x / r) / 2;
+        }
+        return r;
+    }
+
+    fn cbrt(x: int) -> int {
+        if (x == 0) { return 0; }
+        int is_neg = 0;
+        int val = x;
+        if (val < 0) {
+            is_neg = 1;
+            val = -val;
+        }
+        int low = 1;
+        int high = 1290;
+        int r = 0;
+        while (low <= high) {
+            int mid = low + (high - low) / 2;
+            int cube = mid * mid * mid;
+            if (cube <= val) {
+                r = mid;
+                low = mid + 1;
+            } else {
+                high = mid - 1;
+            }
+        }
+        if (is_neg) {
+            return -r;
+        }
+        return r;
+    }
+
+    fn hypot(a: int, b: int) -> int {
+        return sqrt((a * a) + (b * b));
+    }
+
+    fn log2(x: int) -> int {
+        if (x <= 0) { return 0; }
+        int r = 0;
+        int v = x;
+        while (v > 1) {
+            v = v >> 1;
+            r++;
+        }
+        return r;
+    }
+
+    fn log10(x: int) -> int {
+        if (x <= 0) { return 0; }
+        int r = 0;
+        int v = x;
+        while (v >= 10) {
+            v = v / 10;
+            r++;
+        }
+        return r;
+    }
+
+    fn is_power_of_two(x: int) -> int {
+        if (x <= 0) { return 0; }
+        return (x & (x - 1)) == 0;
+    }
+
+    fn next_power_of_two(x: int) -> int {
+        if (x <= 1) { return 1; }
+        int v = x - 1;
+        v = v | (v >> 1);
+        v = v | (v >> 2);
+        v = v | (v >> 4);
+        v = v | (v >> 8);
+        v = v | (v >> 16);
+        return v + 1;
+    }
+
+    fn gcd(a: int, b: int) -> int {
+        int x = abs(a);
+        int y = abs(b);
+        while (y != 0) {
+            int temp = y;
+            y = x % y;
+            x = temp;
+        }
+        return x;
+    }
+
+    fn lcm(a: int, b: int) -> int {
+        if (a == 0 || b == 0) { return 0; }
+        int g = gcd(a, b);
+        if (g == 0) { return 0; }
+        return abs(a * (b / g));
+    }
+
+    fn is_even(x: int) -> int {
+        return (x % 2) == 0;
+    }
+
+    fn is_odd(x: int) -> int {
+        return (x % 2) != 0;
+    }
+
+    fn is_prime(n: int) -> int {
+        if (n <= 1) { return 0; }
+        if (n <= 3) { return 1; }
+        if (n % 2 == 0 || n % 3 == 0) { return 0; }
+        int max_i = sqrt(n);
+        int i = 5;
+        while (i <= max_i) {
+            if (n % i == 0 || n % (i + 2) == 0) {
+                return 0;
+            }
+            i = i + 6;
+        }
+        return 1;
+    }
+
+    fn next_prime(n: int) -> int {
+        if (n <= 2) { return 2; }
+        int p = n;
+        if (p % 2 == 0) { p++; }
+        while (!is_prime(p)) {
+            p = p + 2;
+        }
+        return p;
+    }
+
+    fn factorial(n: int) -> int {
+        if (n <= 1) { return 1; }
+        if (n > 12) { n = 12; }
+        int res = 1;
+        for (int i = 2; i <= n; i++) {
+            res = res * i;
+        }
+        return res;
+    }
+
+    fn combinations(n: int, k: int) -> int {
+        if (k < 0 || k > n) { return 0; }
+        if (k == 0 || k == n) { return 1; }
+        if (k > n - k) { k = n - k; }
+        int res = 1;
+        for (int i = 1; i <= k; i++) {
+            res = res * (n - i + 1);
+            res = res / i;
+        }
+        return res;
+    }
+
+    fn permutations(n: int, k: int) -> int {
+        if (k < 0 || k > n) { return 0; }
+        int res = 1;
+        for (int i = 0; i < k; i++) {
+            res = res * (n - i);
+        }
+        return res;
+    }
+
+    fn fibonacci(n: int) -> int {
+        if (n <= 0) { return 0; }
+        if (n == 1) { return 1; }
+        int prev = 0;
+        int curr = 1;
+        for (int i = 2; i <= n; i++) {
+            int next_val = prev + curr;
+            prev = curr;
+            curr = next_val;
+        }
+        return curr;
+    }
+
+    fn sin_deg(deg: int) -> int {
+        int d = deg % 360;
+        if (d < 0) {
+            d = d + 360;
+        }
+        int sign_mult = 1;
+        if (d >= 180) {
+            sign_mult = -1;
+            d = d - 180;
+        }
+        if (d == 0 || d == 180) {
+            return 0;
+        }
+        if (d == 90) {
+            return 1000 * sign_mult;
+        }
+        int prod = d * (180 - d);
+        int num = 4000 * prod;
+        int den = 40500 - prod;
+        if (den == 0) {
+            return 1000 * sign_mult;
+        }
+        return (num / den) * sign_mult;
+    }
+
+    fn cos_deg(deg: int) -> int {
+        return sin_deg(deg + 90);
+    }
+
+    fn tan_deg(deg: int) -> int {
+        int c = cos_deg(deg);
+        if (c == 0) {
+            if (sin_deg(deg) > 0) { return 2147483647; }
+            return -2147483648;
+        }
+        int s = sin_deg(deg);
+        return (s * 1000) / c;
+    }
+
+    fn distance_2d(x1: int, y1: int, x2: int, y2: int) -> int {
+        return hypot(x2 - x1, y2 - y1);
+    }
+
+    fn manhattan_distance(x1: int, y1: int, x2: int, y2: int) -> int {
+        return abs(x2 - x1) + abs(y2 - y1);
+    }
+
+    fn area_rectangle(width: int, height: int) -> int {
+        return width * height;
+    }
+
+    fn perimeter_rectangle(width: int, height: int) -> int {
+        return 2 * (width + height);
+    }
+
+    fn area_triangle(base: int, height: int) -> int {
+        return (base * height) / 2;
+    }
+
+    fn area_circle_approx(radius: int) -> int {
+        if (radius <= 0) { return 0; }
+        return (PI_APPROX * radius * radius) / 10000;
+    }
+
+    fn rand_range(min_val: int, max_val: int) -> int {
+        if (min_val >= max_val) { return min_val; }
+        int span = max_val - min_val + 1;
+        int r = fundamental::rand();
+        if (r < 0) { r = -r; }
+        return min_val + (r % span);
+    }
+
+    fn rand_choice(a: int, b: int) -> int {
+        int r = fundamental::rand();
+        if (r % 2 == 0) { return a; }
+        return b;
+    }
+
+    fn rand_bool() -> int {
+        int r = fundamental::rand();
+        return (r % 2) != 0;
+    }
+}

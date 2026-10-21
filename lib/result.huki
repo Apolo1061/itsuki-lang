@@ -1,0 +1,20 @@
+#pragma once
+
+#include <fundamental.huki>
+
+struct Result {
+    int is_ok;
+    int value;
+    int error_code;
+    char* error_message;
+};
+
+fn result_ok(val: int) -> struct Result*;
+fn result_err(code: int, msg: char*) -> struct Result*;
+fn result_is_ok(r: struct Result*) -> int;
+fn result_is_err(r: struct Result*) -> int;
+fn result_unwrap(r: struct Result*) -> int;
+fn result_unwrap_or(r: struct Result*, default_val: int) -> int;
+fn result_error_msg(r: struct Result*) -> char*;
+fn result_error_code(r: struct Result*) -> int;
+fn result_free(r: struct Result*) -> void;

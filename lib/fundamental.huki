@@ -1,0 +1,101 @@
+#pragma once
+
+namespace fundamental {
+
+    struct string {
+        int longitud;
+    };
+
+    typedef int size_t;
+    typedef int int32;
+    typedef char int8;
+    typedef int bool_t;
+
+    fn malloc(size: int) -> int*;
+    fn free(ptr: int*) -> void;
+    fn calloc(num: int, size: int) -> int*;
+    fn realloc(ptr: int*, new_size: int) -> int*;
+    fn memset(dest: int*, value: int, count: int) -> int*;
+    fn memcpy(dest: int*, src: int*, count: int) -> int*;
+    fn memmove(dest: int*, src: int*, count: int) -> int*;
+    fn memcmp(s1: int*, s2: int*, count: int) -> int;
+
+    fn strlen(str: char*) -> int;
+    fn strcpy(dest: char*, src: char*) -> char*;
+    fn strncpy(dest: char*, src: char*, n: int) -> char*;
+    fn strcat(dest: char*, src: char*) -> char*;
+    fn strncat(dest: char*, src: char*, n: int) -> char*;
+    fn strcmp(s1: char*, s2: char*) -> int;
+    fn strncmp(s1: char*, s2: char*, n: int) -> int;
+    fn strchr(str: char*, c: int) -> char*;
+    fn strrchr(str: char*, c: int) -> char*;
+    fn strstr(haystack: char*, needle: char*) -> char*;
+    fn strdup(src: char*) -> char*;
+    fn char_at(str: char*, index: int) -> int;
+    fn set_char_at(str: char*, index: int, ch: int) -> void;
+
+    fn is_digit(c: int) -> int;
+    fn is_alpha(c: int) -> int;
+    fn is_alnum(c: int) -> int;
+    fn is_space(c: int) -> int;
+    fn is_upper(c: int) -> int;
+    fn is_lower(c: int) -> int;
+    fn is_xdigit(c: int) -> int;
+    fn to_upper(c: int) -> int;
+    fn to_lower(c: int) -> int;
+
+    fn atoi(str: char*) -> int;
+    fn itoa(val: int, dest: char*, radix: int) -> char*;
+    fn htoi(str: char*) -> int;
+
+    fn abs(x: int) -> int;
+    fn min(a: int, b: int) -> int;
+    fn max(a: int, b: int) -> int;
+    fn clamp(val: int, min_val: int, max_val: int) -> int;
+    fn pow(base: int, exp: int) -> int;
+    fn sqrt(x: int) -> int;
+    fn gcd(a: int, b: int) -> int;
+    fn lcm(a: int, b: int) -> int;
+    fn rand() -> int;
+    fn srand(seed: int) -> void;
+
+    fn exit(code: int) -> void;
+    fn sleep(ms: int) -> void;
+    fn get_tick_count() -> int;
+    fn time() -> int;
+
+    fn putchar(c: int) -> int;
+    fn getchar() -> int;
+    fn puts(str: char*) -> int;
+    fn printf(fmt: char*, ...) -> void;
+    fn print(fmt: char*, ...) -> void;
+    fn println(fmt: char*, ...) -> void;
+    fn read_str(buf: char*) -> void;
+    fn read_int(dest: int*) -> void;
+
+    fn file_exists(path: char*) -> int;
+    fn file_size(path: char*) -> int;
+    fn file_read_all(path: char*, buffer: char*, max_len: int) -> int;
+    fn file_write_all(path: char*, content: char*) -> int;
+    fn file_append(path: char*, content: char*) -> int;
+    fn file_remove(path: char*) -> int;
+
+    // Vector dinamico de enteros
+    struct Vector {
+        int* data;
+        int size;
+        int capacity;
+    };
+
+    fn vector_init(v: struct Vector*, initial_cap: int) -> void;
+    fn vector_push(v: struct Vector*, val: int) -> void;
+    fn vector_pop(v: struct Vector*) -> int;
+    inline fn vector_get(v: struct Vector*, idx: int) -> int;
+    inline fn vector_set(v: struct Vector*, idx: int, val: int) -> void;
+    fn vector_free(v: struct Vector*) -> void;
+
+    // Algoritmos clasicos
+    fn qsort(arr: int*, low: int, high: int) -> void;
+    fn binary_search(arr: int*, n: int, target: int) -> int;
+    fn reverse_array(arr: int*, n: int) -> void;
+}

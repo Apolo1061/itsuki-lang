@@ -68,6 +68,8 @@ namespace fundamental {
     fn getchar() -> int;
     fn puts(str: char*) -> int;
     fn printf(fmt: char*, ...) -> void;
+    fn print(fmt: char*, ...) -> void;
+    fn println(fmt: char*, ...) -> void;
     fn read_str(buf: char*) -> void;
     fn read_int(dest: int*) -> void;
 

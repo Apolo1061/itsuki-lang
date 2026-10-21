@@ -11,12 +11,17 @@ typedef struct {
     char* current_namespace;
     const char* filename;
     const char* source_code;
+    int error_count;
+    int panic_mode;
+    int max_errors;
 } Parser;
 
 Parser* init_parser(Lexer* lexer);
 void parser_set_context(Parser* parser, const char* filename, const char* source_code);
 Token* parser_peek_token(Parser* parser);
 ASTNode* parser_parse(Parser* parser);
+void parser_synchronize(Parser* parser);
+int parser_get_error_count(Parser* parser);
 
 int find_enum_constant(const char* name, int* out_val);
 int find_constant(const char* name, int* out_val);

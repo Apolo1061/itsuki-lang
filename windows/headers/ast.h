@@ -42,11 +42,15 @@ typedef enum {
     AST_NUMBER,
     AST_FLOAT_LITERAL,
     AST_STRING,
+    AST_INTERPOLATED_STRING,
     AST_NULL,
     AST_CLASS,
     AST_THIS,
     AST_INLINE_ASM,
-    AST_INLINE_C
+    AST_INLINE_C,
+    AST_GOTO,
+    AST_LABEL,
+    AST_SIZEOF
 } ASTNodeType;
 
 typedef enum {

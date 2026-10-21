@@ -27,31 +27,38 @@ int fundamental_getchar(void) {
 
 void fundamental_print_str(const char* s) {
     if (s) fputs(s, stdout);
+    fflush(stdout);
 }
 
 void fundamental_println_str(const char* s) {
     if (s) puts(s);
     else puts("(null)");
+    fflush(stdout);
 }
 
 void fundamental_println_empty(void) {
     putchar('\n');
+    fflush(stdout);
 }
 
 void fundamental_print_int(long long n) {
     printf("%lld", n);
+    fflush(stdout);
 }
 
 void fundamental_println_int(long long n) {
     printf("%lld\n", n);
+    fflush(stdout);
 }
 
 void fundamental_print_float(double d) {
     printf("%f", d);
+    fflush(stdout);
 }
 
 void fundamental_println_float(double d) {
     printf("%f\n", d);
+    fflush(stdout);
 }
 
 void fundamental_read_str(char* buf, int max_len) {
@@ -221,3 +228,101 @@ size_t fundamental_file_write(const void* ptr, size_t sz, size_t count, FILE* f)
 int fundamental_file_remove(const char* path) {
     return remove(path);
 }
+
+// ========================================================
+// Manejo de Saltos No Locales (setjmp / longjmp) para Itsuki
+// ========================================================
+#if defined(__x86_64__) || defined(_M_X64)
+__asm__(
+".globl itsuki_setjmp\n"
+".globl _itsuki_setjmp\n"
+".globl setjmp\n"
+".globl _setjmp\n"
+"itsuki_setjmp:\n"
+"_itsuki_setjmp:\n"
+"setjmp:\n"
+"_setjmp:\n"
+"    movq 8(%rsp), %rdx\n"
+"    movq %rbx, 0(%rdx)\n"
+"    movq %rbp, 8(%rdx)\n"
+"    movq %r12, 16(%rdx)\n"
+"    movq %r13, 24(%rdx)\n"
+"    movq %r14, 32(%rdx)\n"
+"    movq %r15, 40(%rdx)\n"
+"    leaq 8(%rsp), %rcx\n"
+"    movq %rcx, 48(%rdx)\n"
+"    movq 0(%rsp), %rcx\n"
+"    movq %rcx, 56(%rdx)\n"
+"    xorq %rax, %rax\n"
+"    ret\n"
+"\n"
+".globl itsuki_longjmp\n"
+".globl _itsuki_longjmp\n"
+".globl longjmp\n"
+".globl _longjmp\n"
+"itsuki_longjmp:\n"
+"_itsuki_longjmp:\n"
+"longjmp:\n"
+"_longjmp:\n"
+"    movq 8(%rsp), %rdx\n"
+"    movq 16(%rsp), %rax\n"
+"    testq %rax, %rax\n"
+"    jnz 1f\n"
+"    movq $1, %rax\n"
+"1:\n"
+"    movq 0(%rdx), %rbx\n"
+"    movq 8(%rdx), %rbp\n"
+"    movq 16(%rdx), %r12\n"
+"    movq 24(%rdx), %r13\n"
+"    movq 32(%rdx), %r14\n"
+"    movq 40(%rdx), %r15\n"
+"    movq 48(%rdx), %rsp\n"
+"    movq 56(%rdx), %rcx\n"
+"    jmp *%rcx\n"
+);
+#else
+__asm__(
+".globl itsuki_setjmp\n"
+".globl _itsuki_setjmp\n"
+".globl setjmp\n"
+".globl _setjmp\n"
+"itsuki_setjmp:\n"
+"_itsuki_setjmp:\n"
+"setjmp:\n"
+"_setjmp:\n"
+"    movl 4(%esp), %edx\n"
+"    movl %ebx, 0(%edx)\n"
+"    movl %esi, 4(%edx)\n"
+"    movl %edi, 8(%edx)\n"
+"    movl %ebp, 12(%edx)\n"
+"    leal 4(%esp), %ecx\n"
+"    movl %ecx, 16(%edx)\n"
+"    movl 0(%esp), %ecx\n"
+"    movl %ecx, 20(%edx)\n"
+"    xorl %eax, %eax\n"
+"    ret\n"
+"\n"
+".globl itsuki_longjmp\n"
+".globl _itsuki_longjmp\n"
+".globl longjmp\n"
+".globl _longjmp\n"
+"itsuki_longjmp:\n"
+"_itsuki_longjmp:\n"
+"longjmp:\n"
+"_longjmp:\n"
+"    movl 4(%esp), %edx\n"
+"    movl 8(%esp), %eax\n"
+"    testl %eax, %eax\n"
+"    jnz 1f\n"
+"    movl $1, %eax\n"
+"1:\n"
+"    movl 0(%edx), %ebx\n"
+"    movl 4(%edx), %esi\n"
+"    movl 8(%edx), %edi\n"
+"    movl 12(%edx), %ebp\n"
+"    movl 16(%edx), %esp\n"
+"    movl 20(%edx), %ecx\n"
+"    jmp *%ecx\n"
+);
+#endif
+

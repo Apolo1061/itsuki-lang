@@ -141,6 +141,9 @@ Token* lexer_collect_id_or_keyword(Lexer* lexer) {
     else if (strcmp(value, "template") == 0) type = TOKEN_TEMPLATE;
     else if (strcmp(value, "typename") == 0) type = TOKEN_TYPENAME;
     else if (strcmp(value, "__c__") == 0 || strcmp(value, "__c_code__") == 0 || strcmp(value, "c_code") == 0) type = TOKEN_C_CODE;
+    else if (strcmp(value, "goto") == 0) type = TOKEN_GOTO;
+    else if (strcmp(value, "sizeof") == 0) type = TOKEN_SIZEOF;
+    else if (strcmp(value, "auto") == 0) type = TOKEN_AUTO;
     
     return init_token(type, value, start_line, start_col);
 }
@@ -206,6 +209,67 @@ Token* lexer_collect_number(Lexer* lexer) {
     return init_token(is_float ? TOKEN_FLOAT_LITERAL : TOKEN_NUMBER, value, start_line, start_col);
 }
 
+static int lexer_parse_escape_seq(Lexer* lexer) {
+    char c = lexer->current_char;
+    switch (c) {
+        case 'n': return '\n';
+        case 't': return '\t';
+        case 'r': return '\r';
+        case '0': {
+            // Octal: \0 o \012
+            int oct = 0;
+            if (lexer_peek(lexer) >= '0' && lexer_peek(lexer) <= '7') {
+                lexer_advance(lexer);
+                oct = lexer->current_char - '0';
+                if (lexer_peek(lexer) >= '0' && lexer_peek(lexer) <= '7') {
+                    lexer_advance(lexer);
+                    oct = (oct * 8) + (lexer->current_char - '0');
+                }
+                return oct;
+            }
+            return '\0';
+        }
+        case '1': case '2': case '3': case '4': case '5': case '6': case '7': {
+            int oct = c - '0';
+            if (lexer_peek(lexer) >= '0' && lexer_peek(lexer) <= '7') {
+                lexer_advance(lexer);
+                oct = (oct * 8) + (lexer->current_char - '0');
+                if (lexer_peek(lexer) >= '0' && lexer_peek(lexer) <= '7') {
+                    lexer_advance(lexer);
+                    oct = (oct * 8) + (lexer->current_char - '0');
+                }
+            }
+            return oct;
+        }
+        case 'x': case 'X': {
+            // Hex escape: \x1b, \xFF
+            int hex = 0;
+            if (isxdigit((unsigned char)lexer_peek(lexer))) {
+                lexer_advance(lexer);
+                char h1 = lexer->current_char;
+                hex = isdigit((unsigned char)h1) ? (h1 - '0') : (tolower((unsigned char)h1) - 'a' + 10);
+                if (isxdigit((unsigned char)lexer_peek(lexer))) {
+                    lexer_advance(lexer);
+                    char h2 = lexer->current_char;
+                    hex = (hex * 16) + (isdigit((unsigned char)h2) ? (h2 - '0') : (tolower((unsigned char)h2) - 'a' + 10));
+                }
+                return hex;
+            }
+            return 'x';
+        }
+        case 'a': return '\a';
+        case 'b': return '\b';
+        case 'f': return '\f';
+        case 'v': return '\v';
+        case 'e': case 'E': return 27; // ESC (0x1B)
+        case '\\': return '\\';
+        case '\'': return '\'';
+        case '"': return '"';
+        case '?': return '\?';
+        default: return (unsigned char)c;
+    }
+}
+
 Token* lexer_collect_string(Lexer* lexer) {
     int start_line = lexer->line;
     int start_col = lexer->column;
@@ -218,19 +282,7 @@ Token* lexer_collect_string(Lexer* lexer) {
         char ch = lexer->current_char;
         if (ch == '\\') {
             lexer_advance(lexer);
-            switch (lexer->current_char) {
-                case 'n': ch = '\n'; break;
-                case 't': ch = '\t'; break;
-                case 'r': ch = '\r'; break;
-                case '0': ch = '\0'; break;
-                case 'a': ch = '\a'; break;
-                case 'b': ch = '\b'; break;
-                case 'f': ch = '\f'; break;
-                case 'v': ch = '\v'; break;
-                case '\\': ch = '\\'; break;
-                case '"': ch = '"'; break;
-                default: ch = lexer->current_char; break;
-            }
+            ch = (char)lexer_parse_escape_seq(lexer);
         }
         
         if (length + 2 >= capacity) {
@@ -256,19 +308,7 @@ Token* lexer_collect_char(Lexer* lexer) {
     int val = 0;
     if (lexer->current_char == '\\') {
         lexer_advance(lexer);
-        switch (lexer->current_char) {
-            case 'n': val = '\n'; break;
-            case 't': val = '\t'; break;
-            case 'r': val = '\r'; break;
-            case '0': val = '\0'; break;
-            case 'a': val = '\a'; break;
-            case 'b': val = '\b'; break;
-            case 'f': val = '\f'; break;
-            case 'v': val = '\v'; break;
-            case '\\': val = '\\'; break;
-            case '\'': val = '\''; break;
-            default: val = (unsigned char)lexer->current_char; break;
-        }
+        val = lexer_parse_escape_seq(lexer);
     } else {
         val = (unsigned char)lexer->current_char;
     }
@@ -317,10 +357,6 @@ Token* lexer_collect_directive(Lexer* lexer) {
         free(directive);
         return lexer_get_next_token(lexer);
     }
-    if (strcmp(directive, "import") == 0) {
-        free(directive);
-        return init_token(TOKEN_IMPORT, strdup("#import"), start_line, start_col);
-    }
     if (strcmp(directive, "include") == 0) {
         free(directive);
         return init_token(TOKEN_INCLUDE, strdup("#include"), start_line, start_col);
@@ -348,6 +384,15 @@ Token* lexer_get_next_token(Lexer* lexer) {
 
         if (lexer->current_char == '#') {
             return lexer_collect_directive(lexer);
+        }
+        
+        if ((lexer->current_char == 'f' || lexer->current_char == '$') && lexer_peek(lexer) == '"') {
+            lexer_advance(lexer); // saltar 'f' o '$'
+            Token* tok = lexer_collect_string(lexer);
+            tok->type = TOKEN_INTERPOLATED_STRING;
+            tok->line = start_line;
+            tok->column = start_col;
+            return tok;
         }
         
         if (isalpha((unsigned char)lexer->current_char) || lexer->current_char == '_') {

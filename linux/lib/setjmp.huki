@@ -1,0 +1,55 @@
+#pragma once
+
+#include <fundamental.huki>
+
+// Bufer de almacenamiento de contexto para saltos no locales (x86 / x86_64)
+struct jmp_buf {
+    int data[32];
+};
+
+typedef struct jmp_buf jmp_buf_t;
+typedef struct jmp_buf JmpBuf;
+
+// Primitivas de bajo nivel provistas por el runtime del lenguaje Itsuki
+extern fn itsuki_setjmp(env: void*) -> int;
+extern fn itsuki_longjmp(env: void*, val: int) -> void;
+
+// --- Macros clasicas compatibles con C (<setjmp.h>) ---
+// Nota tecnica: setjmp DEBE capturar directamente el marco de la funcion llamadora,
+// por lo que se implementa como macro hacia la primitiva itsuki_setjmp.
+#define setjmp(env) itsuki_setjmp(env)
+#define longjmp(env, val) itsuki_longjmp(env, val)
+
+// --- Alias snake_case adaptados a Itsuki ---
+#define set_jmp(env) itsuki_setjmp(env)
+#define long_jmp(env, val) itsuki_longjmp(env, val)
+
+// --- Gestion estructurada de excepciones (Try / Catch) ---
+struct TryContext {
+    struct jmp_buf env;
+    int error_code;
+    char* error_message;
+};
+
+typedef struct TryContext TryContext;
+
+namespace setjmp {
+
+    // Inicializa una estructura de contexto TryContext
+    fn try_init(ctx: struct TryContext*) -> void;
+
+    // Lanza una excepcion hacia el bloque manejador registrado mas cercano
+    fn try_throw(ctx: struct TryContext*, error_code: int, msg: char*) -> void;
+
+    // Obtiene el codigo de error capturado
+    fn try_get_code(ctx: struct TryContext*) -> int;
+
+    // Obtiene el mensaje de descripcion del error capturado
+    fn try_get_message(ctx: struct TryContext*) -> char*;
+}
+
+// Funciones utilitarias globales de conveniencia
+fn try_init(ctx: struct TryContext*) -> void;
+fn try_throw(ctx: struct TryContext*, error_code: int, msg: char*) -> void;
+fn try_get_code(ctx: struct TryContext*) -> int;
+fn try_get_message(ctx: struct TryContext*) -> char*;

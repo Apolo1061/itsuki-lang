@@ -17,6 +17,7 @@
 #endif
 
 static int colors_enabled = 1;
+static int warnings_suppressed = 0;
 
 void diag_init(void) {
 #ifdef _WIN32
@@ -40,6 +41,14 @@ void diag_set_colors_enabled(int enabled) {
 
 int diag_get_colors_enabled(void) {
     return colors_enabled;
+}
+
+void diag_suppress_warnings(int suppress) {
+    warnings_suppressed = suppress;
+}
+
+int diag_are_warnings_suppressed(void) {
+    return warnings_suppressed;
 }
 
 // Extrae una linea especifica (1-based) de la cadena de codigo fuente
@@ -80,6 +89,9 @@ void diag_report(DiagSeverity severity,
                  int token_len,
                  const char* message,
                  const char* suggestion) {
+    if (severity == DIAG_WARNING && warnings_suppressed) {
+        return;
+    }
     const char* c_reset = colors_enabled ? "\033[0m" : "";
     const char* c_bold  = colors_enabled ? "\033[1m" : "";
     const char* c_blue  = colors_enabled ? "\033[1;34m" : "";
@@ -174,6 +186,7 @@ void diag_report(DiagSeverity severity,
         fprintf(stderr, "  %s= ayuda:%s %s\n", c_cyan, c_reset, suggestion);
     }
     fprintf(stderr, "\n");
+    fflush(stderr);
 }
 
 void diag_error(const char* filename,

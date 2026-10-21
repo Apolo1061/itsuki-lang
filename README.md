@@ -16,6 +16,14 @@
 
 **Itsuki** es un lenguaje de programación compilado y de alto rendimiento que genera código ensamblador nativo **x86_64** y **x86_32**. Diseñado para ofrecer control de bajo nivel con gran claridad, incluye soporte para números de punto flotante (`float`, `double`) mediante SSE2, diagnósticos de error modernos estilo Rust/Clang, un optimizador por mirilla (peephole optimizer), runtime nativo autocontenido, preprocesador C completo, interoperabilidad directa con C/C++ y un **gestor de paquetes integrado** basado en GitHub.
 
+---
+
+## Características Principales
+
+*  ⚡ **Generación Nativa Dual (x86_64 y x86_32)**: Genera ensamblador nativo puro tanto para arquitecturas de **64 bits** (`-m64`, registros `%rax`, `%rbp`, `%rsp`, convenciones de llamada System V AMD64 y Microsoft x64 con shadow space) como de **32 bits** (`-m32`).
+
+---
+
 ## 🚀 Instalación Rápida
 
 ### En Windows
@@ -79,7 +87,20 @@ itsuki doctor
 ```
 *Muestra la arquitectura de la PC (64 o 32 bits), la versión de GCC en uso, los flags de enlace configurados y el estado del soporte multilib.*
 
----
+### Ejecutar pruebas con el Runner Integrado (`itsuki test`):
+```bash
+# Ejecutar tests auto-descubiertos (*_test.suki, test_*.suki, test.suki):
+itsuki test
+
+# O especificar archivos de pruebas directamente:
+itsuki test test_suite.suki
+```
+
+*Las funciones declaradas con prefijo `test_*` o `test` (retornando `int` con `0` para éxito o `void`)
+
+### 📖 Documentacion del itsuki
+
+https://apolo1061.github.io/learn-itsuki/ 
 
 ## 📦 Gestor de Paquetes
 
@@ -104,113 +125,6 @@ itsuki list
 itsuki uninstall libreria
 ```
 
-### Usar la librería en tu código
-```c
-#include <fundamental.huki>
-#include <libreria.huki>     // Se importa automáticamente desde ~/.itsuki/packages/
-
-fn main() -> void {
-    // Funciones de la librería instalada
-}
-```
-
----
-
-## 📖 Sintaxis del Lenguaje
-
-### Variables y Tipos
-```c
-var x: int = 10;
-var f: float = 3.14159;      // Punto flotante de 32 bits (SSE2)
-var d: double = 2.718281828; // Punto flotante de 64 bits (SSE2)
-var big: int64 = 9223372036854775807;
-var mensaje: char* = "Cadena de texto";
-var activo: bool = true;
-```
-
-### Operaciones de Punto Flotante
-```c
-using namespace fundamental;
-
-fn calcular_area(radio: float) -> float {
-    var pi: float = 3.141592;
-    return pi * radio * radio;
-}
-
-fn main() -> int {
-    var radio: float = 5.5;
-    var area: float = calcular_area(radio);
-    println("Area del circulo:");
-    println(area);
-    return 0;
-}
-```
-
-### Funciones
-```c
-fn sumar(a: int, b: int) -> int {
-    return a + b;
-}
-
-fn saludar(nombre: char*) -> void {
-    printf("Hola, %s\n", nombre);
-}
-```
-
-### Estructuras y Punteros
-```c
-struct Punto {
-    var x: int;
-    var y: int;
-};
-
-fn mover(p: Punto*, dx: int, dy: int) -> void {
-    p->x += dx;
-    p->y += dy;
-}
-```
-
-### Clases y Métodos
-```c
-class Contador {
-    var valor: int;
-
-public:
-    fn Contador(inicio: int) -> void {
-        this.valor = inicio;
-    }
-
-    fn incrementar() -> void {
-        this.valor++;
-    }
-
-    fn obtener() -> int {
-        return this.valor;
-    }
-};
-```
-
-### Interoperabilidad con C
-Puedes llamar funciones de C declarándolas con `extern` y pasando los archivos `.c` al compilar:
-
-```c
-// main.suki
-#include <fundamental.huki>
-
-extern fn funcion_en_c(a: int, b: int) -> int;
-
-fn main() -> void {
-    var res: int = funcion_en_c(10, 20);
-    printf("Resultado de C: %d\n", res);
-}
-```
-
-Compilación directa conjunta:
-```bash
-itsuki run main.suki codigo_c.c
-```
-
----
 
 ## 📂 Estructura del Repositorio
 
@@ -220,14 +134,14 @@ itsuki/
 ├── img/                   # Logotipo oficial del lenguaje
 ├── linux/                 # Compilador e instalador nativo para Linux
 │   ├── headers/           # Cabeceras C (.h)
-│   ├── lib/               # Runtime y librería estándar (<fundamental>, <math>, <string>, <c>)
+│   ├── lib/               # Runtime y librería estándar (<fundamental>, <math>, <string>, <ctypes>, <setjmp>, <time>, <c>)
 │   ├── src/               # Implementación en C (.c)
 │   ├── Makefile           # Makefile oficial
 │   ├── build.sh           # Script de compilación rápida
 │   └── install.sh         # Instalador automático para Linux (Bash)
 ├── windows/               # Compilador e instalador nativo para Windows (Win32)
 │   ├── headers/           # Cabeceras C (.h)
-│   ├── lib/               # Runtime y librería estándar
+│   ├── lib/               # Runtime y librería estándar (<fundamental>, <math>, <string>, <ctypes>, <setjmp>, <time>, <c>)
 │   ├── src/               # Implementación en C (.c)
 │   ├── build.bat          # Script de compilación rápida (MinGW)
 │   ├── install.bat        # Instalador automático para Windows (Batch)

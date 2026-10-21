@@ -1,0 +1,67 @@
+#pragma once
+
+#include <fundamental.huki>
+#include <result.huki>
+
+fn result_ok(val: int) -> struct Result* {
+    var r: struct Result* = malloc(sizeof(struct Result));
+    if (r != 0) {
+        r->is_ok = 1;
+        r->value = val;
+        r->error_code = 0;
+        r->error_message = "";
+    }
+    return r;
+}
+
+fn result_err(code: int, msg: char*) -> struct Result* {
+    var r: struct Result* = malloc(sizeof(struct Result));
+    if (r != 0) {
+        r->is_ok = 0;
+        r->value = 0;
+        r->error_code = code;
+        r->error_message = msg ? msg : "Error desconocido";
+    }
+    return r;
+}
+
+fn result_is_ok(r: struct Result*) -> int {
+    if (r == 0) { return 0; }
+    return r->is_ok;
+}
+
+fn result_is_err(r: struct Result*) -> int {
+    if (r == 0) { return 1; }
+    return r->is_ok == 0;
+}
+
+fn result_unwrap(r: struct Result*) -> int {
+    if (r == 0 || r->is_ok == 0) {
+        printf("[Result Error]: Puntero nulo o error\n");
+        exit(1);
+    }
+    return r->value;
+}
+
+fn result_unwrap_or(r: struct Result*, default_val: int) -> int {
+    if (r == 0 || r->is_ok == 0) {
+        return default_val;
+    }
+    return r->value;
+}
+
+fn result_error_msg(r: struct Result*) -> char* {
+    if (r == 0) { return ""; }
+    return r->error_message;
+}
+
+fn result_error_code(r: struct Result*) -> int {
+    if (r == 0) { return -1; }
+    return r->error_code;
+}
+
+fn result_free(r: struct Result*) -> void {
+    if (r != 0) {
+        free(r);
+    }
+}

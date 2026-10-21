@@ -226,6 +226,11 @@ void preprocessor_reset(void) {
     // Inicializar macros estándar
     preprocessor_define("__ITSUKI__", "1");
     preprocessor_define("__ITSUKI_VERSION__", "2");
+#ifdef _WIN32
+    preprocessor_define("_WIN32", "1");
+#elif defined(__linux__)
+    preprocessor_define("__linux__", "1");
+#endif
 }
 
 static int is_emitting(void) {
@@ -990,10 +995,20 @@ static int try_resolve_file(const char* base_dir, const char* name, int is_syste
     if (is_system_include) {
         if (strcmp(name, "stdio.h") == 0 ||
             strcmp(name, "stdlib.h") == 0 ||
-            strcmp(name, "string.h") == 0 || strcmp(name, "time.h") == 0) {
+            strcmp(name, "string.h") == 0) {
             effective_name = "c.huki";
         } else if (strcmp(name, "math.h") == 0) {
             effective_name = "math.huki";
+        } else if (strcmp(name, "ctype.h") == 0 ||
+                   strcmp(name, "ctypes.h") == 0 ||
+                   strcmp(name, "ctype.huki") == 0) {
+            effective_name = "ctypes.huki";
+        } else if (strcmp(name, "setjmp.h") == 0) {
+            effective_name = "setjmp.huki";
+        } else if (strcmp(name, "time.h") == 0 ||
+                   strcmp(name, "time.huki") == 0 ||
+                   strcmp(name, "time") == 0) {
+            effective_name = "time.huki";
         }
     }
 
@@ -1441,10 +1456,18 @@ static void preprocess_internal(const char* source, const char* filepath, Buffer
                 continue;
             }
 
-            // 9. #include y #import
-            if (strcmp(directive, "include") == 0 || strcmp(directive, "import") == 0) {
+            // Directiva no soportada: #import
+            if (strcmp(directive, "import") == 0) {
+                int col = (int)(dir_hash - line) + 1;
+                diag_error(filepath, source, line_number, col, 7,
+                           "la directiva '#import' no existe en Itsuki",
+                           "utilice '#include' en su lugar");
+                exit(1);
+            }
+
+            // 9. #include
+            if (strcmp(directive, "include") == 0) {
                 char* clean_args = clean_directive_comments(trimmed, &in_block_comment);
-                int is_import_directive = (strcmp(directive, "import") == 0);
                 char inc_name[256] = {0};
                 char* cur_t = clean_args;
                 while (*cur_t && isspace((unsigned char)*cur_t)) cur_t++;
@@ -1501,12 +1524,10 @@ static void preprocess_internal(const char* source, const char* filepath, Buffer
                         char msg[1024];
                         char help[1024];
                         snprintf(msg, sizeof(msg),
-                                 "la directiva #%s %c%s%c requiere la extension '.huki'",
-                                 is_import_directive ? "import" : "include",
+                                 "la directiva #include %c%s%c requiere la extension '.huki'",
                                  delim_open, inc_name, delim_close);
                         snprintf(help, sizeof(help),
-                                 "utilice '#%s %c%s.huki%c'",
-                                 is_import_directive ? "import" : "include",
+                                 "utilice '#include %c%s.huki%c'",
                                  delim_open, inc_name, delim_close);
 
                         int col = 1;
@@ -1549,16 +1570,8 @@ static void preprocess_internal(const char* source, const char* filepath, Buffer
                             }
                         }
 
-                        // Verificar #pragma once o semántica #import
-                        if (is_import_directive) {
-                            if (is_pragma_once(resolved_path)) {
-                                buf_append_char(out, '\n');
-                                line_number++;
-                                buf_free(line_buf);
-                                continue;
-                            }
-                            mark_pragma_once(resolved_path);
-                        } else if (is_pragma_once(resolved_path)) {
+                        // Verificar #pragma once
+                        if (is_pragma_once(resolved_path)) {
                             buf_append_char(out, '\n');
                             line_number++;
                             buf_free(line_buf);
@@ -1682,6 +1695,11 @@ char* preprocess_source(const char* source, const char* filepath) {
     if (find_macro("__ITSUKI__") == NULL) {
         preprocessor_define("__ITSUKI__", "1");
         preprocessor_define("__ITSUKI_VERSION__", "2");
+#ifdef _WIN32
+        preprocessor_define("_WIN32", "1");
+#elif defined(__linux__)
+        preprocessor_define("__linux__", "1");
+#endif
     }
 
     Buffer* out = buf_new(strlen(source) + 256);

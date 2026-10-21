@@ -2,13 +2,14 @@
 #include "embedded_lib.h"
 #include "package_manager.h"
 #include "diagnostics.h"
+#include "arena.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <ctype.h>
 
 ASTNode* create_ast_node(ASTNodeType type, int line) {
-    ASTNode* node = calloc(1, sizeof(ASTNode));
+    ASTNode* node = c_calloc(1, sizeof(ASTNode));
     node->type = type;
     node->line = line;
     node->column = 1;
@@ -26,6 +27,9 @@ Parser* init_parser(Lexer* lexer) {
     parser->current_namespace = NULL;
     parser->filename = NULL;
     parser->source_code = NULL;
+    parser->error_count = 0;
+    parser->panic_mode = 0;
+    parser->max_errors = 20;
     add_known_namespace("fundamental");
     add_known_struct("fundamental::string");
     add_known_struct("string");
@@ -65,6 +69,7 @@ static const char* token_type_name(TokenType type) {
         case TOKEN_NUMBER: return "numero entero";
         case TOKEN_FLOAT_LITERAL: return "numero flotante";
         case TOKEN_STRING: return "cadena literal";
+        case TOKEN_INTERPOLATED_STRING: return "cadena interpolada f\"...\"";
         case TOKEN_SEMICOLON: return "';'";
         case TOKEN_COLON: return "':'";
         case TOKEN_COLON_COLON: return "'::'";
@@ -89,14 +94,63 @@ static const char* token_type_name(TokenType type) {
         case TOKEN_UNION: return "'union'";
         case TOKEN_ENUM: return "'enum'";
         case TOKEN_CLASS: return "'class'";
+        case TOKEN_GOTO: return "'goto'";
         case TOKEN_EOF: return "fin de archivo";
         default: return "token";
     }
 }
 
+int parser_get_error_count(Parser* parser) {
+    return parser ? parser->error_count : 0;
+}
+
+void parser_synchronize(Parser* parser) {
+    parser->panic_mode = 0;
+    while (parser->current_token && parser->current_token->type != TOKEN_EOF) {
+        if (parser->current_token->type == TOKEN_SEMICOLON) {
+            if (parser->current_token->value) free(parser->current_token->value);
+            free(parser->current_token);
+            if (parser->peek_token != NULL) {
+                parser->current_token = parser->peek_token;
+                parser->peek_token = NULL;
+            } else {
+                parser->current_token = lexer_get_next_token(parser->lexer);
+            }
+            return;
+        }
+
+        switch (parser->current_token->type) {
+            case TOKEN_CLASS:
+            case TOKEN_STRUCT:
+            case TOKEN_FN:
+            case TOKEN_VAR:
+            case TOKEN_CONST:
+            case TOKEN_FOR:
+            case TOKEN_IF:
+            case TOKEN_WHILE:
+            case TOKEN_RETURN:
+            case TOKEN_NAMESPACE:
+            case TOKEN_USING:
+            case TOKEN_RBRACE:
+                return;
+            default:
+                break;
+        }
+
+        if (parser->current_token->value) free(parser->current_token->value);
+        free(parser->current_token);
+        if (parser->peek_token != NULL) {
+            parser->current_token = parser->peek_token;
+            parser->peek_token = NULL;
+        } else {
+            parser->current_token = lexer_get_next_token(parser->lexer);
+        }
+    }
+}
+
 void parser_eat(Parser* parser, TokenType type) {
     if (parser->current_token->type == type) {
-        free(parser->current_token->value);
+        if (parser->current_token->value) free(parser->current_token->value);
         free(parser->current_token);
         if (parser->peek_token != NULL) {
             parser->current_token = parser->peek_token;
@@ -105,26 +159,34 @@ void parser_eat(Parser* parser, TokenType type) {
             parser->current_token = lexer_get_next_token(parser->lexer);
         }
     } else {
-        char msg[256];
-        char suggestion[256];
-        snprintf(msg, sizeof(msg), "se esperaba %s pero se encontro '%s'",
-                 token_type_name(type), parser->current_token->value ? parser->current_token->value : "");
-        if (type == TOKEN_SEMICOLON) {
-            snprintf(suggestion, sizeof(suggestion), "coloca un punto y coma ';' al final de la instruccion");
-        } else if (type == TOKEN_RPAREN) {
-            snprintf(suggestion, sizeof(suggestion), "cierra el parentesis con ')'");
-        } else if (type == TOKEN_RBRACE) {
-            snprintf(suggestion, sizeof(suggestion), "cierra el bloque con '}'");
-        } else if (type == TOKEN_RBRACKET) {
-            snprintf(suggestion, sizeof(suggestion), "cierra los corchetes con ']'");
-        } else {
-            snprintf(suggestion, sizeof(suggestion), "verifica la sintaxis de la expresion o sentencia");
+        if (!parser->panic_mode) {
+            parser->error_count++;
+            parser->panic_mode = 1;
+            char msg[256];
+            char suggestion[256];
+            snprintf(msg, sizeof(msg), "se esperaba %s pero se encontro '%s'",
+                     token_type_name(type), parser->current_token->value ? parser->current_token->value : "");
+            if (type == TOKEN_SEMICOLON) {
+                snprintf(suggestion, sizeof(suggestion), "coloca un punto y coma ';' al final de la instruccion");
+            } else if (type == TOKEN_RPAREN) {
+                snprintf(suggestion, sizeof(suggestion), "cierra el parentesis con ')'");
+            } else if (type == TOKEN_RBRACE) {
+                snprintf(suggestion, sizeof(suggestion), "cierra el bloque con '}'");
+            } else if (type == TOKEN_RBRACKET) {
+                snprintf(suggestion, sizeof(suggestion), "cierra los corchetes con ']'");
+            } else {
+                snprintf(suggestion, sizeof(suggestion), "verifica la sintaxis de la expresion o sentencia");
+            }
+            int col = parser->current_token->column > 0 ? parser->current_token->column : 1;
+            int tlen = parser->current_token->value ? (int)strlen(parser->current_token->value) : 1;
+            if (tlen <= 0) tlen = 1;
+            diag_error(parser->filename, parser->source_code, parser->current_token->line, col, tlen, msg, suggestion);
+            if (parser->error_count >= (parser->max_errors > 0 ? parser->max_errors : 20)) {
+                fprintf(stderr, "\n[Itsuki] Limite maximo de errores alcanzado (%d). Deteniendo analisis sintactico.\n", parser->error_count);
+                exit(1);
+            }
         }
-        int col = parser->current_token->column > 0 ? parser->current_token->column : 1;
-        int tlen = parser->current_token->value ? (int)strlen(parser->current_token->value) : 1;
-        if (tlen <= 0) tlen = 1;
-        diag_error(parser->filename, parser->source_code, parser->current_token->line, col, tlen, msg, suggestion);
-        exit(1);
+        parser_synchronize(parser);
     }
 }
 
@@ -608,8 +670,89 @@ int find_enum_constant(const char* name, int* out_val) {
     return find_constant(name, out_val);
 }
 
+typedef struct KnownFuncSig {
+    char name[128];
+    char ret_type[128];
+    struct KnownFuncSig* next;
+} KnownFuncSig;
+
+static KnownFuncSig* known_func_sigs = NULL;
+
+static void register_func_sig(const char* name, const char* ret_type) {
+    if (!name || !ret_type) return;
+    KnownFuncSig* sig = malloc(sizeof(KnownFuncSig));
+    strncpy(sig->name, name, 127);
+    sig->name[127] = '\0';
+    strncpy(sig->ret_type, ret_type, 127);
+    sig->ret_type[127] = '\0';
+    sig->next = known_func_sigs;
+    known_func_sigs = sig;
+}
+
+static const char* find_func_return_type(const char* name) {
+    if (!name) return NULL;
+    const char* base_name = name;
+    const char* p = name;
+    while ((p = strstr(p, "::")) != NULL) {
+        base_name = p + 2;
+        p += 2;
+    }
+    KnownFuncSig* curr = known_func_sigs;
+    while (curr) {
+        if (strcmp(curr->name, name) == 0 || strcmp(curr->name, base_name) == 0) {
+            return curr->ret_type;
+        }
+        curr = curr->next;
+    }
+    if (strcmp(base_name, "strlen") == 0 || strcmp(base_name, "strcmp") == 0 ||
+        strcmp(base_name, "strncmp") == 0 || strcmp(base_name, "atoi") == 0 ||
+        strcmp(base_name, "abs") == 0 || strcmp(base_name, "min") == 0 ||
+        strcmp(base_name, "max") == 0 || strcmp(base_name, "time") == 0 ||
+        strcmp(base_name, "time_now") == 0 || strcmp(base_name, "time_ms") == 0 ||
+        strcmp(base_name, "clock_ms") == 0) {
+        return "int";
+    }
+    if (strcmp(base_name, "str_copy") == 0 || strcmp(base_name, "str_concat") == 0 ||
+        strcmp(base_name, "strdup") == 0 || strcmp(base_name, "strcpy") == 0 ||
+        strcmp(base_name, "str_substring") == 0 || strcmp(base_name, "str_to_upper") == 0 ||
+        strcmp(base_name, "str_to_lower") == 0 || strcmp(base_name, "str_trim") == 0) {
+        return "char*";
+    }
+    if (strcmp(base_name, "malloc") == 0 || strcmp(base_name, "calloc") == 0 ||
+        strcmp(base_name, "realloc") == 0) {
+        return "int*";
+    }
+    if (strcmp(base_name, "sqrt") == 0 || strcmp(base_name, "sin") == 0 ||
+        strcmp(base_name, "cos") == 0 || strcmp(base_name, "pow") == 0) {
+        return "double";
+    }
+    return NULL;
+}
+
+static int parser_get_type_size(const char* tname) {
+    if (!tname) return 4;
+    while (strncmp(tname, "const ", 6) == 0) tname += 6;
+    while (*tname && isspace((unsigned char)*tname)) tname++;
+    if (strchr(tname, '*')) return 4;
+    if (strcmp(tname, "char") == 0 || strcmp(tname, "int8") == 0 ||
+        strcmp(tname, "uint8") == 0 || strcmp(tname, "bool") == 0) return 1;
+    if (strcmp(tname, "int16") == 0 || strcmp(tname, "uint16") == 0 || strcmp(tname, "short") == 0) return 2;
+    if (strcmp(tname, "int") == 0 || strcmp(tname, "uint32") == 0 ||
+        strcmp(tname, "int32") == 0 || strcmp(tname, "float") == 0) return 4;
+    if (strcmp(tname, "double") == 0 || strcmp(tname, "int64") == 0 ||
+        strcmp(tname, "uint64") == 0 || strcmp(tname, "long long") == 0) return 8;
+    if (strcmp(tname, "void") == 0) return 0;
+    return 4;
+}
+
 int eval_const_expr(ASTNode* node, int* out_val) {
     if (node == NULL) return 0;
+    if (node->type == AST_SIZEOF) {
+        if (node->type_name) {
+            if (out_val) *out_val = parser_get_type_size(node->type_name);
+            return 1;
+        }
+    }
     if (node->type == AST_NUMBER) {
         if (out_val) *out_val = node->int_value;
         return 1;
@@ -730,10 +873,15 @@ static int is_primitive_type_token(TokenType t) {
     return (t == TOKEN_INT || t == TOKEN_CHAR || t == TOKEN_VOID || t == TOKEN_BOOL ||
             t == TOKEN_STRING_TYPE || t == TOKEN_FLOAT || t == TOKEN_DOUBLE ||
             t == TOKEN_INT64 || t == TOKEN_UINT64 || t == TOKEN_UINT32 ||
-            t == TOKEN_UINT16 || t == TOKEN_UINT8 || t == TOKEN_INT16 || t == TOKEN_INT8);
+            t == TOKEN_UINT16 || t == TOKEN_UINT8 || t == TOKEN_INT16 || t == TOKEN_INT8 ||
+            t == TOKEN_AUTO);
 }
 
 char* parser_parse_type(Parser* parser) {
+    if (parser->current_token->type == TOKEN_AUTO) {
+        parser_eat(parser, TOKEN_AUTO);
+        return strdup("auto");
+    }
     int has_const = 0;
     if (parser->current_token->type == TOKEN_CONST) {
         parser_eat(parser, TOKEN_CONST);
@@ -1598,10 +1746,31 @@ ASTNode* parser_parse_block(Parser* parser) {
     int line = parser->current_token->line;
     ASTNode* block = create_ast_node(AST_BLOCK, line);
     ASTNode* last_stmt = NULL;
+    int prev_was_terminator = 0;
+    int reported_unreachable = 0;
     
     while (parser->current_token->type != TOKEN_RBRACE && parser->current_token->type != TOKEN_EOF) {
+        if (prev_was_terminator && !reported_unreachable) {
+            int is_label = (parser->current_token->type == TOKEN_IDENTIFIER && parser_peek_token(parser)->type == TOKEN_COLON);
+            if (!is_label) {
+                diag_warning(parser->filename, parser->source_code, parser->current_token->line,
+                             parser->current_token->column,
+                             parser->current_token->value ? (int)strlen(parser->current_token->value) : 1,
+                             "codigo inalcanzable detectado tras return/goto");
+                reported_unreachable = 1;
+            } else {
+                prev_was_terminator = 0;
+            }
+        }
+
         ASTNode* stmt = parser_parse_statement(parser);
         if (stmt != NULL) {
+            if (stmt->type == AST_LABEL) {
+                prev_was_terminator = 0;
+                reported_unreachable = 0;
+            } else if (stmt->type == AST_RETURN_STATEMENT || stmt->type == AST_GOTO) {
+                prev_was_terminator = 1;
+            }
             if (block->statements == NULL) {
                 block->statements = stmt;
             } else {
@@ -1736,6 +1905,12 @@ ASTNode* parser_parse_function(Parser* parser) {
     func->is_static = is_static;
     if (parser->current_namespace) {
         func->namespace_prefix = strdup(parser->current_namespace);
+    }
+    register_func_sig(func_name, return_type);
+    if (func->namespace_prefix) {
+        char qual[256];
+        snprintf(qual, sizeof(qual), "%s::%s", func->namespace_prefix, func_name);
+        register_func_sig(qual, return_type);
     }
     return func;
 }
@@ -2060,8 +2235,85 @@ static ASTNode* parser_parse_class(Parser* parser) {
 
 static ASTNode* parser_parse_statement_or_block(Parser* parser);
 
+static ASTNode* parser_parse_interpolated_string(Parser* parser) {
+    int line = parser->current_token->line;
+    int col = parser->current_token->column;
+    char* raw = parser->current_token->value ? strdup(parser->current_token->value) : strdup("");
+    parser_eat(parser, TOKEN_INTERPOLATED_STRING);
+
+    ASTNode* node = create_ast_node(AST_INTERPOLATED_STRING, line);
+    node->column = col;
+    node->type_name = "char*";
+
+    if (!raw || strlen(raw) == 0) {
+        if (raw) free(raw);
+        return node;
+    }
+
+    ASTNode* parts_head = NULL;
+    ASTNode* parts_tail = NULL;
+
+    int i = 0;
+    int len = (int)strlen(raw);
+    while (i < len) {
+        if (raw[i] == '{') {
+            i++; // saltar '{'
+            int start = i;
+            int brace_depth = 1;
+            while (i < len && brace_depth > 0) {
+                if (raw[i] == '{') brace_depth++;
+                else if (raw[i] == '}') brace_depth--;
+                if (brace_depth == 0) break;
+                i++;
+            }
+            int expr_len = i - start;
+            if (expr_len > 0) {
+                char* expr_str = c_strndup(&raw[start], expr_len);
+                Lexer* sub_lexer = init_lexer(expr_str);
+                Parser* sub_parser = init_parser(sub_lexer);
+                parser_set_context(sub_parser, parser->filename, parser->source_code);
+                ASTNode* sub_expr = parser_parse_expression(sub_parser);
+                if (sub_expr) {
+                    if (!parts_head) {
+                        parts_head = sub_expr;
+                    } else {
+                        parts_tail->next = sub_expr;
+                    }
+                    parts_tail = sub_expr;
+                }
+            }
+            if (i < len && raw[i] == '}') i++; // saltar '}'
+        } else {
+            int start = i;
+            while (i < len && raw[i] != '{') {
+                i++;
+            }
+            int text_len = i - start;
+            if (text_len > 0) {
+                char* text_part = c_strndup(&raw[start], text_len);
+                ASTNode* str_node = create_ast_node(AST_STRING, line);
+                str_node->string_value = text_part;
+                str_node->type_name = "char*";
+                if (!parts_head) {
+                    parts_head = str_node;
+                } else {
+                    parts_tail->next = str_node;
+                }
+                parts_tail = str_node;
+            }
+        }
+    }
+
+    free(raw);
+    node->children = parts_head;
+    return node;
+}
+
 static ASTNode* parser_parse_primary(Parser* parser) {
     int line = parser->current_token->line;
+    if (parser->current_token->type == TOKEN_INTERPOLATED_STRING) {
+        return parser_parse_interpolated_string(parser);
+    }
     if (parser->current_token->type == TOKEN_FLOAT_LITERAL) {
         ASTNode* node = create_ast_node(AST_FLOAT_LITERAL, line);
         node->column = parser->current_token->column;
@@ -2076,6 +2328,19 @@ static ASTNode* parser_parse_primary(Parser* parser) {
         }
         node->string_value = strdup(parser->current_token->value);
         parser_eat(parser, TOKEN_FLOAT_LITERAL);
+        return node;
+    }
+    if (parser->current_token->type == TOKEN_SIZEOF) {
+        int s_line = parser->current_token->line;
+        parser_eat(parser, TOKEN_SIZEOF);
+        parser_eat(parser, TOKEN_LPAREN);
+        ASTNode* node = create_ast_node(AST_SIZEOF, s_line);
+        if (is_type_start(parser)) {
+            node->type_name = parser_parse_type(parser);
+        } else {
+            node->expr = parser_parse_expression(parser);
+        }
+        parser_eat(parser, TOKEN_RPAREN);
         return node;
     }
     if (parser->current_token->type == TOKEN_NUMBER) {
@@ -2580,17 +2845,22 @@ static ASTNode* parser_parse_var_declaration(Parser* parser) {
     int line = parser->current_token->line;
     int is_const = 0;
     int is_static = 0;
+    int is_auto_decl = 0;
     
-    while (parser->current_token->type == TOKEN_CONST || parser->current_token->type == TOKEN_VAR || parser->current_token->type == TOKEN_STATIC) {
+    while (parser->current_token->type == TOKEN_CONST ||
+           parser->current_token->type == TOKEN_VAR ||
+           parser->current_token->type == TOKEN_STATIC ||
+           parser->current_token->type == TOKEN_AUTO) {
         if (parser->current_token->type == TOKEN_CONST) is_const = 1;
         if (parser->current_token->type == TOKEN_STATIC) is_static = 1;
+        if (parser->current_token->type == TOKEN_AUTO) is_auto_decl = 1;
         parser_eat(parser, parser->current_token->type);
     }
     
     char* var_name = NULL;
     char* vtype = NULL;
     
-    if (is_type_start(parser)) {
+    if (is_type_start(parser) && !is_auto_decl) {
         vtype = parser_parse_type(parser);
         while (parser->current_token->type == TOKEN_CONST || parser->current_token->type == TOKEN_STATIC) {
             if (parser->current_token->type == TOKEN_CONST) is_const = 1;
@@ -2615,6 +2885,8 @@ static ASTNode* parser_parse_var_declaration(Parser* parser) {
                 parser_eat(parser, parser->current_token->type);
             }
             vtype = parser_parse_type(parser);
+        } else if (is_auto_decl) {
+            vtype = strdup("auto");
         }
     } else {
         printf("Error de sintaxis: se esperaba nombre o tipo de variable en la linea %d (se encontro '%s')\n",
@@ -2678,13 +2950,47 @@ static ASTNode* parser_parse_var_declaration(Parser* parser) {
         exit(1);
     }
     
-    if (vtype == NULL) {
-        if (init_expr && init_expr->type == AST_STRING) {
-            vtype = strdup("fundamental::string");
-        } else if (init_expr && init_expr->type == AST_NULL) {
-            vtype = strdup("void*");
-        } else if (init_expr && init_expr->type == AST_FLOAT_LITERAL) {
-            vtype = init_expr->is_float ? strdup("float") : strdup("double");
+    if (vtype == NULL || strcmp(vtype, "auto") == 0) {
+        if (vtype) free(vtype);
+        vtype = NULL;
+        if (init_expr) {
+            if (init_expr->type == AST_STRING) {
+                vtype = strdup("char*");
+            } else if (init_expr->type == AST_NULL) {
+                vtype = strdup("void*");
+            } else if (init_expr->type == AST_FLOAT_LITERAL) {
+                vtype = init_expr->is_float ? strdup("float") : strdup("double");
+            } else if (init_expr->type == AST_BOOLEAN) {
+                vtype = strdup("bool");
+            } else if (init_expr->type == AST_SIZEOF) {
+                vtype = strdup("int");
+            } else if (init_expr->type == AST_CALL_EXPR && init_expr->callee && init_expr->callee->name) {
+                const char* rtype = find_func_return_type(init_expr->callee->name);
+                if (rtype) {
+                    vtype = strdup(rtype);
+                } else {
+                    vtype = strdup("int");
+                }
+            } else if (init_expr->type == AST_BINARY_EXPR) {
+                if (init_expr->op == 'E' || init_expr->op == 'N' ||
+                    init_expr->op == '<' || init_expr->op == '>' ||
+                    init_expr->op == 'L' || init_expr->op == 'G' ||
+                    (init_expr->op_str && (strcmp(init_expr->op_str, "==") == 0 || strcmp(init_expr->op_str, "!=") == 0 ||
+                                           strcmp(init_expr->op_str, "<=") == 0 || strcmp(init_expr->op_str, ">=") == 0 ||
+                                           strcmp(init_expr->op_str, "&&") == 0 || strcmp(init_expr->op_str, "||") == 0))) {
+                    vtype = strdup("bool");
+                } else if (init_expr->is_double) {
+                    vtype = strdup("double");
+                } else if (init_expr->is_float) {
+                    vtype = strdup("float");
+                } else {
+                    vtype = strdup("int");
+                }
+            } else if (init_expr->type == AST_UNARY_EXPR && init_expr->op == '!') {
+                vtype = strdup("bool");
+            } else {
+                vtype = strdup("int");
+            }
         } else {
             vtype = strdup("int");
         }
@@ -2890,6 +3196,34 @@ static ASTNode* parser_parse_statement(Parser* parser) {
         parser_eat(parser, TOKEN_SEMICOLON);
         return NULL;
     }
+    
+    // goto etiqueta;
+    if (parser->current_token->type == TOKEN_GOTO) {
+        parser_eat(parser, TOKEN_GOTO);
+        if (parser->current_token->type != TOKEN_IDENTIFIER) {
+            printf("Error de sintaxis: se esperaba identificador de etiqueta tras 'goto' en la linea %d\n", parser->current_token->line);
+            exit(1);
+        }
+        char* label_name = strdup(parser->current_token->value);
+        parser_eat(parser, TOKEN_IDENTIFIER);
+        parser_eat(parser, TOKEN_SEMICOLON);
+
+        ASTNode* goto_node = create_ast_node(AST_GOTO, line);
+        goto_node->name = label_name;
+        return goto_node;
+    }
+
+    // etiqueta:
+    if (parser->current_token->type == TOKEN_IDENTIFIER && parser_peek_token(parser)->type == TOKEN_COLON) {
+        char* label_name = strdup(parser->current_token->value);
+        parser_eat(parser, TOKEN_IDENTIFIER);
+        parser_eat(parser, TOKEN_COLON);
+
+        ASTNode* label_node = create_ast_node(AST_LABEL, line);
+        label_node->name = label_name;
+        return label_node;
+    }
+
     if (parser->current_token->type == TOKEN_USING) {
         return parser_parse_using(parser);
     }
@@ -3099,6 +3433,7 @@ static ASTNode* parser_parse_statement(Parser* parser) {
 
     if (parser->current_token->type == TOKEN_VAR ||
         parser->current_token->type == TOKEN_CONST ||
+        parser->current_token->type == TOKEN_AUTO ||
         parser->current_token->type == TOKEN_STATIC ||
         is_type_start(parser)) {
         return parser_parse_var_declaration(parser);
@@ -3146,7 +3481,7 @@ static ASTNode* parser_parse_declaration(Parser* parser) {
     if (parser->current_token->type == TOKEN_TEMPLATE) {
         return parser_parse_template_declaration(parser);
     }
-    if (parser->current_token->type == TOKEN_IMPORT || parser->current_token->type == TOKEN_INCLUDE) {
+    if (parser->current_token->type == TOKEN_INCLUDE) {
         return parser_parse_import(parser);
     }
     if (parser->current_token->type == TOKEN_USING) {
@@ -3227,6 +3562,7 @@ static ASTNode* parser_parse_declaration(Parser* parser) {
     
     if (parser->current_token->type == TOKEN_CONST ||
         parser->current_token->type == TOKEN_VAR ||
+        parser->current_token->type == TOKEN_AUTO ||
         parser->current_token->type == TOKEN_STATIC ||
         is_type_start(parser)) {
         ASTNode* vdecl = parser_parse_var_declaration(parser);

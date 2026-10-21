@@ -1,0 +1,124 @@
+#pragma once
+
+#include <fundamental.huki>
+#include <c.huki>
+
+// Constantes de tiempo
+const int SECONDS_PER_MINUTE = 60;
+const int SECONDS_PER_HOUR = 3600;
+const int SECONDS_PER_DAY = 86400;
+const int MS_PER_SECOND = 1000;
+
+// Estructura de Fecha y Hora en tiempo civil (desglosado)
+struct DateTime {
+    int year;        // Año completo (ej. 2026)
+    int month;       // Mes del año (1 = Enero, 12 = Diciembre)
+    int day;         // Día del mes (1 - 31)
+    int hour;        // Hora en formato 24h (0 - 23)
+    int min;         // Minuto (0 - 59)
+    int sec;         // Segundo (0 - 59)
+    int wday;        // Día de la semana (0 = Domingo, 1 = Lunes, ..., 6 = Sábado)
+    int yday;        // Día del año (1 - 366)
+    int is_dst;      // Horario de verano (0 = no, 1 = sí)
+};
+
+typedef struct DateTime DateTime;
+
+// Estructura para medición de rendimiento y cronometrado
+struct Benchmark {
+    int start_ms;
+    int end_ms;
+    int elapsed_ms;
+};
+
+typedef struct Benchmark Benchmark;
+
+// Estructura de compatibilidad con C (<time.h>)
+struct tm {
+    int tm_sec;      // Segundos [0-59]
+    int tm_min;      // Minutos [0-59]
+    int tm_hour;     // Horas [0-23]
+    int tm_mday;     // Día del mes [1-31]
+    int tm_mon;      // Mes [0-11, donde 0 es Enero]
+    int tm_year;     // Años desde 1900
+    int tm_wday;     // Días desde Domingo [0-6]
+    int tm_yday;     // Días desde 1 de Enero [0-365]
+    int tm_isdst;    // Bandera de horario de verano
+};
+
+typedef struct tm tm_t;
+
+namespace time {
+
+    // --- Obtención de Tiempo y Cronometrado ---
+    fn now() -> int;
+    fn sec() -> int;
+    fn ms() -> int;
+    fn clock_ms() -> int;
+    fn sleep(ms: int) -> void;
+    fn sleep_sec(seconds: int) -> void;
+    fn diff_sec(start_sec: int, end_sec: int) -> int;
+    fn diff_ms(start_ms: int, end_ms: int) -> int;
+
+    // --- Cálculos de Calendario ---
+    fn is_leap_year(year: int) -> int;
+    fn days_in_month(year: int, month: int) -> int;
+    fn day_of_week(year: int, month: int, day: int) -> int;
+    fn day_of_year(year: int, month: int, day: int) -> int;
+
+    // --- Conversión y Desglose ---
+    fn to_datetime(timestamp: int, dt: struct DateTime*) -> void;
+    fn to_timestamp(dt: struct DateTime*) -> int;
+    fn local(dt: struct DateTime*) -> void;
+    fn utc(dt: struct DateTime*) -> void;
+
+    // --- Formato de Cadenas ---
+    fn format(dt: struct DateTime*, buf: char*, max_len: int) -> char*;
+    fn format_date(dt: struct DateTime*, buf: char*, max_len: int) -> char*;
+    fn format_time(dt: struct DateTime*, buf: char*, max_len: int) -> char*;
+    fn str_now(buf: char*, max_len: int) -> char*;
+    fn day_name(wday: int) -> char*;
+    fn month_name(month: int) -> char*;
+
+    // --- Medición de Rendimiento (Benchmark) ---
+    fn benchmark_start(b: struct Benchmark*) -> void;
+    fn benchmark_stop(b: struct Benchmark*) -> int;
+    fn benchmark_elapsed(b: struct Benchmark*) -> int;
+}
+
+#ifndef _TIME_HUKI_INSIDE_SUKI_
+// Alias globales y macros de conveniencia
+#define time_now() time::now()
+#define time_sec() time::sec()
+#define time_ms() time::ms()
+#define clock_ms() time::clock_ms()
+#define time_sleep(ms) time::sleep(ms)
+#define sleep_ms(ms) time::sleep(ms)
+#define sleep_sec(sec) time::sleep_sec(sec)
+#define time_diff_sec(start_sec, end_sec) time::diff_sec(start_sec, end_sec)
+#define time_diff_ms(start_ms, end_ms) time::diff_ms(start_ms, end_ms)
+
+#define is_leap_year(year) time::is_leap_year(year)
+#define days_in_month(year, month) time::days_in_month(year, month)
+#define time_day_of_week(year, month, day) time::day_of_week(year, month, day)
+#define time_day_of_year(year, month, day) time::day_of_year(year, month, day)
+
+#define time_to_datetime(timestamp, dt) time::to_datetime(timestamp, dt)
+#define time_to_timestamp(dt) time::to_timestamp(dt)
+#define time_local(dt) time::local(dt)
+#define time_utc(dt) time::utc(dt)
+
+#define time_format(dt, buf, max_len) time::format(dt, buf, max_len)
+#define time_format_date(dt, buf, max_len) time::format_date(dt, buf, max_len)
+#define time_format_time(dt, buf, max_len) time::format_time(dt, buf, max_len)
+#define time_str_now(buf, max_len) time::str_now(buf, max_len)
+#define time_day_name(wday) time::day_name(wday)
+#define time_month_name(month) time::month_name(month)
+
+#define benchmark_start(b) time::benchmark_start(b)
+#define benchmark_stop(b) time::benchmark_stop(b)
+#define benchmark_elapsed(b) time::benchmark_elapsed(b)
+#endif
+
+// Alias clásicos de C (<time.h>)
+#define difftime(time1, time0) ((time1) - (time0))

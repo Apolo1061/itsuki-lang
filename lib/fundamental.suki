@@ -1,0 +1,114 @@
+#pragma once
+
+#include <fundamental.huki>
+
+namespace fundamental {
+
+    fn vector_init(v: struct Vector*, initial_cap: int) -> void {
+        if (initial_cap <= 0) {
+            initial_cap = 4;
+        }
+        v->data = malloc(initial_cap * 4);
+        v->size = 0;
+        v->capacity = initial_cap;
+    }
+
+    fn vector_push(v: struct Vector*, val: int) -> void {
+        if (v->size >= v->capacity) {
+            int new_cap = v->capacity * 2;
+            int* new_data = malloc(new_cap * 4);
+            for (int i = 0; i < v->size; i++) {
+                new_data[i] = v->data[i];
+            }
+            free(v->data);
+            v->data = new_data;
+            v->capacity = new_cap;
+        }
+        v->data[v->size] = val;
+        v->size++;
+    }
+
+    fn vector_pop(v: struct Vector*) -> int {
+        if (v->size <= 0) {
+            return 0;
+        }
+        v->size--;
+        return v->data[v->size];
+    }
+
+    inline fn vector_get(v: struct Vector*, idx: int) -> int {
+        if (idx < 0 || idx >= v->size) {
+            return 0;
+        }
+        return v->data[idx];
+    }
+
+    inline fn vector_set(v: struct Vector*, idx: int, val: int) -> void {
+        if (idx >= 0 && idx < v->size) {
+            v->data[idx] = val;
+        }
+    }
+
+    fn vector_free(v: struct Vector*) -> void {
+        if (v->data != 0) {
+            free(v->data);
+            v->data = 0;
+        }
+        v->size = 0;
+        v->capacity = 0;
+    }
+
+    // Algoritmo: Ordenamiento Rapido (QuickSort) in-place
+    fn qsort(arr: int*, low: int, high: int) -> void {
+        if (low < high) {
+            int pivot = arr[high];
+            int i = low - 1;
+            for (int j = low; j < high; j++) {
+                if (arr[j] <= pivot) {
+                    i++;
+                    int temp = arr[i];
+                    arr[i] = arr[j];
+                    arr[j] = temp;
+                }
+            }
+            int swap_temp = arr[i + 1];
+            arr[i + 1] = arr[high];
+            arr[high] = swap_temp;
+            int pi = i + 1;
+
+            qsort(arr, low, pi - 1);
+            qsort(arr, pi + 1, high);
+        }
+    }
+
+    // Algoritmo: Busqueda Binaria (Binary Search)
+    fn binary_search(arr: int*, n: int, target: int) -> int {
+        int left = 0;
+        int right = n - 1;
+        while (left <= right) {
+            int mid = left + (right - left) / 2;
+            if (arr[mid] == target) {
+                return mid;
+            }
+            if (arr[mid] < target) {
+                left = mid + 1;
+            } else {
+                right = mid - 1;
+            }
+        }
+        return -1;
+    }
+
+    // Invertir arreglo in-place
+    fn reverse_array(arr: int*, n: int) -> void {
+        int left = 0;
+        int right = n - 1;
+        while (left < right) {
+            int tmp = arr[left];
+            arr[left] = arr[right];
+            arr[right] = tmp;
+            left++;
+            right--;
+        }
+    }
+}
